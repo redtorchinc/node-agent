@@ -56,6 +56,13 @@ func install() error {
 	if err := os.WriteFile(launchdPlist, []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("write plist: %w", err)
 	}
+	// Whitelist with the macOS Application Firewall. If the firewall is off,
+	// these calls are silent no-ops; if on, they stop it from dropping
+	// incoming connections to the agent's port. Errors are logged but not
+	// fatal — a misconfigured firewall shouldn't block install on a box
+	// where the firewall isn't in use.
+	allowFirewall(exe)
+
 	// Bootstrap loads + starts in one step on modern macOS.
 	if err := runLaunchctl("bootstrap", "system", launchdPlist); err != nil {
 		return err
@@ -65,6 +72,24 @@ func install() error {
 	return nil
 }
 
+// allowFirewall adds the binary to the macOS Application Firewall allow-list
+// and unblocks incoming connections. socketfilterfw lives at a stable path
+// across every supported macOS version.
+func allowFirewall(exe string) {
+	const fw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+	if _, err := os.Stat(fw); err != nil {
+		return
+	}
+	cmd := exec.Command(fw, "--add", exe)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+	cmd = exec.Command(fw, "--unblockapp", exe)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
 func uninstall() error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("uninstall requires root")
@@ -72,6 +97,15 @@ func uninstall() error {
 	_ = runLaunchctl("bootout", "system/"+launchdLabel)
 	if err := os.Remove(launchdPlist); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	// Firewall rule is keyed on the binary path; remove it so a future
+	// install to the same path doesn't inherit a stale entry.
+	const fw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+	if _, err := os.Stat(fw); err == nil {
+		if exe, err := os.Executable(); err == nil {
+			exe, _ = filepath.EvalSymlinks(exe)
+			_ = exec.Command(fw, "--remove", exe).Run()
+		}
 	}
 	fmt.Println("rt-node-agent uninstalled (config preserved at " + configDirMac + ")")
 	return nil

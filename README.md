@@ -269,6 +269,21 @@ If `install.sh` fails at `useradd`, you're not root — run with `sudo sh`, not 
 
 ### macOS
 
+**Application Firewall blocking port 11435.** If the case-manager can't reach `/health` but `curl localhost:11435/health` from the node itself works, the macOS firewall is dropping incoming connections because `rt-node-agent` isn't in its allow-list. From v0.2.0 the install step handles this automatically; for v0.1.0 installs:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/rt-node-agent
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/rt-node-agent
+sudo launchctl kickstart -k system/com.redtorch.rt-node-agent
+```
+
+Verify:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked /usr/local/bin/rt-node-agent
+# → "incoming connections are not being blocked for rt-node-agent"
+```
+
 Log files (launchd writes to these, not to Console.app):
 
 ```sh

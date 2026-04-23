@@ -1,0 +1,90 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, ext: '' }
+          - { goos: linux,   goarch: arm64, ext: '' }
+          - { goos: darwin,  goarch: amd64, ext: '' }
+          - { goos: darwin,  goarch: arm64, ext: '' }
+          - { goos: windows, goarch: amd64, ext: '.exe' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          GIT_SHA=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LD="-s -w \
+              -X github.com/redtorchinc/node-agent/internal/buildinfo.Version=${VERSION} \
+              -X github.com/redtorchinc/node-agent/internal/buildinfo.GitSHA=${GIT_SHA} \
+              -X github.com/redtorchinc/node-agent/internal/buildinfo.BuildTime=${BUILD_TIME}"
+          OUT="rt-node-agent_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -trimpath -ldflags "$LD" -o "$OUT" ./cmd/rt-node-agent
+          echo "ARTIFACT=$OUT" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: checksums
+        run: |
+          cd artifacts
+          sha256sum rt-node-agent_* > SHA256SUMS
+      - name: sign (minisign)
+        if: ${{ env.MINISIGN_KEY != '' }}
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSPHRASE: ${{ secrets.MINISIGN_PASSPHRASE }}
+        run: |
+          sudo apt-get install -y minisign
+          printf '%s\n' "$MINISIGN_KEY" > /tmp/minisign.key
+          cd artifacts
+          for f in rt-node-agent_* SHA256SUMS; do
+            echo "$MINISIGN_PASSPHRASE" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.minisig"
+          done
+          shred -u /tmp/minisign.key
+      - name: attest
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'artifacts/rt-node-agent_*'
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/rt-node-agent_*
+            artifacts/SHA256SUMS
+            artifacts/*.minisig
+            scripts/install.sh
+            scripts/install.ps1
+          generate_release_notes: true

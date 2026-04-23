@@ -1,0 +1,36 @@
+# Example rt-node-agent config — copy to /etc/rt-node-agent/config.yaml
+# (or %ProgramData%\rt-node-agent\config.yaml on Windows) and edit.
+#
+# Every field is optional — defaults match SPEC.md §HTTP API.
+
+# HTTP listener.
+port: 11435
+bind: 0.0.0.0
+
+# Bearer token for POST /actions/*. Prefer token_file over inlining.
+# The token file should be mode 0600 owned by root:rt-agent on Linux.
+# token: "inline-only-for-dev"
+token_file: /etc/rt-node-agent/token
+
+# Local Ollama endpoint. Override if Ollama listens on a non-default host.
+ollama_endpoint: http://localhost:11434
+
+# Expose /metrics in Prometheus text format. Off by default.
+metrics_enabled: false
+
+# Optional: scrape cooperating Python services that expose a PyTorch
+# allocator JSON endpoint. See SPEC.md §"Service allocator scraping".
+#
+# Expected response shape from the service:
+#   {"allocated_mb": 1864.8, "reserved_mb": 1890.0, "max_allocated_mb": 1874.7}
+#
+# Both thresholds below must be exceeded by reserved_mb to fire the
+# corresponding degraded reason:
+#   - reserved/allocated > 3.0 AND reserved_mb > threshold_critical_mb → vram_service_creep_critical
+#   - reserved/allocated > 2.0 AND reserved_mb > threshold_warn_mb     → vram_service_creep_warn
+service_allocators:
+  - name: gliner2-service
+    url: http://localhost:8077/v1/debug/gpu
+    threshold_warn_mb: 4096
+    threshold_critical_mb: 10240
+    scrape_interval_s: 30

@@ -52,6 +52,18 @@ func install() error {
 	if err := os.MkdirAll(configDirMac, 0o755); err != nil {
 		return err
 	}
+	if err := writeConfigExample(configDirMac); err != nil {
+		return fmt.Errorf("write config.yaml.example: %w", err)
+	}
+
+	// Token bootstrap. macOS daemon runs as root (no UserName in the plist),
+	// so 0600 root-only is the correct perm — no group-read needed.
+	tokenPath := filepath.Join(configDirMac, "token")
+	newToken, err := ensureTokenMac(tokenPath)
+	if err != nil {
+		return fmt.Errorf("bootstrap token: %w", err)
+	}
+
 	plist := fmt.Sprintf(plistTemplate, launchdLabel, exe, logMacOut, logMacErr)
 	if err := os.WriteFile(launchdPlist, []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("write plist: %w", err)
@@ -69,7 +81,34 @@ func install() error {
 	}
 	_ = runLaunchctl("enable", "system/"+launchdLabel)
 	fmt.Println("rt-node-agent installed and started (launchd)")
+	if newToken != "" {
+		fmt.Println()
+		fmt.Println("A bearer token was generated and written to " + tokenPath + ":")
+		fmt.Println("  " + newToken)
+		fmt.Println()
+		fmt.Println("The case-manager backend will use this token for POST /actions/*.")
+		fmt.Println("To rotate: write a new value to the file (mode 600, owner root)")
+		fmt.Println("          then: sudo launchctl kickstart -k system/" + launchdLabel)
+	}
 	return nil
+}
+
+// ensureTokenMac writes a fresh token at path if missing. Returns the
+// generated token, or "" when one was already in place. Heals perms on
+// reinstall so a manually-created 644 file doesn't leak.
+func ensureTokenMac(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		_ = os.Chmod(path, 0o600)
+		return "", nil
+	}
+	tok, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return tok, nil
 }
 
 // allowFirewall adds the binary to the macOS Application Firewall allow-list

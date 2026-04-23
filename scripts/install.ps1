@@ -65,7 +65,7 @@ try {
     }
 
     Say "done. /health: http://127.0.0.1:$port/health"
-    Say "next: write a token to %ProgramData%\rt-node-agent\token to enable /actions/*"
+    Say "the bearer token above is what the case-manager backend uses for POST /actions/*."
 } finally {
     Remove-Item -Recurse -Force $tmp.FullName -ErrorAction SilentlyContinue
 }

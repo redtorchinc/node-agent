@@ -34,6 +34,7 @@ We treat any remote code execution, authentication bypass, or path traversal on 
 
 ## Secret handling
 
-- The Bearer token for `/actions/*` lives in `/etc/rt-node-agent/token` (`%ProgramData%\rt-node-agent\token` on Windows), mode 0600, owned by `root:rt-agent` on Linux.
+- The Bearer token for `/actions/*` lives in `/etc/rt-node-agent/token` on Linux (mode `640`, owned `root:rt-agent`), in the same path on macOS (mode `600`, owned `root`), and in `%ProgramData%\rt-node-agent\token` on Windows (default ProgramData ACL — Administrators + LocalSystem read).
 - The agent does **not** log the token, request headers, or the request body of `/actions/*`.
-- `install.sh` and `install.ps1` do **not** generate a token. Operators install one manually. Rationale: a publicly-downloadable installer that generates tokens is a footgun — the token would only be as secret as the install log.
+- The installer (`rt-node-agent install`) generates a 32-byte random token via `crypto/rand` when the token file doesn't already exist, writes it with the right perms, and prints it once to stdout for the operator to capture. Reinstalls never rotate an existing token. To deploy with a fleet-wide shared token, write it to the token path **before** running `install.sh` — the installer sees the file and skips generation.
+- The token is only as secret as the terminal where install runs. For `curl ... | sudo sh`, that's the operator's local terminal — fine for trusted-LAN deployment. Don't pipe install output into a shared logger.

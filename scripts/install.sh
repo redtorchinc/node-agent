@@ -100,4 +100,4 @@ else
 fi
 
 info "done. health: http://127.0.0.1:${port}/health"
-info "next: echo <token> | sudo tee /etc/rt-node-agent/token  (then restart service) to enable /actions/*"
+info "the bearer token above is what the case-manager backend uses for POST /actions/*."

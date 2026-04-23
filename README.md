@@ -119,18 +119,28 @@ Every field is optional. See [`examples/config.yaml`](./examples/config.yaml) fo
 | `RT_AGENT_OLLAMA`    | `http://localhost:11434`   | Ollama endpoint                           |
 | `RT_AGENT_METRICS`   | *unset*                    | Set `1` to enable `/metrics`              |
 
-### Enable `/actions/*` (set a token)
+### Bearer token for `/actions/*`
 
 Read endpoints (`/health`, `/version`, `/metrics`) are open on the LAN by design — matches the air-gapped OPSEC model, no PII flows through this agent. Mutating endpoints need a Bearer token.
 
+**The installer generates a token automatically and prints it once at the end of install.** Capture that output — it's what the case-manager backend uses for `Authorization: Bearer`. The token file is also persisted with correct perms at:
+
+| OS       | Path                                       | Perms                      |
+|---       |---                                         |---                         |
+| Linux    | `/etc/rt-node-agent/token`                 | `640` owned `root:rt-agent`|
+| macOS    | `/etc/rt-node-agent/token`                 | `600` owned `root`         |
+| Windows  | `%ProgramData%\rt-node-agent\token`        | default ACL                |
+
 Without a token configured, `POST /actions/*` returns **503 token not configured** — an intentional signal that the endpoint is not yet provisioned (vs. 401 which implies auth is set up and rejected).
+
+### Rotating the token
 
 #### Linux
 
 ```sh
 openssl rand -hex 32 | sudo tee /etc/rt-node-agent/token >/dev/null
-sudo chmod 600 /etc/rt-node-agent/token
 sudo chown root:rt-agent /etc/rt-node-agent/token
+sudo chmod 640 /etc/rt-node-agent/token
 sudo systemctl restart rt-node-agent
 ```
 
@@ -148,11 +158,13 @@ From elevated PowerShell:
 
 ```powershell
 $token = -join (1..64 | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
-$dir = "$env:ProgramData\rt-node-agent"
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Set-Content -Path "$dir\token" -Value $token -NoNewline -Encoding ASCII
+Set-Content -Path "$env:ProgramData\rt-node-agent\token" -Value $token -NoNewline -Encoding ASCII
 Restart-Service rt-node-agent
 ```
+
+### Using a fleet-wide shared token
+
+If you want every node to accept the same token (simpler for the backend), write it to the same path **before** running `install.sh` — the installer only generates a token when the file doesn't already exist. Or run the rotate steps above on each node after install.
 
 ---
 

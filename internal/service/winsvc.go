@@ -23,6 +23,21 @@ func install() error {
 	}
 	exe, _ = filepath.Abs(exe)
 
+	// Config dir under %ProgramData% — default ACL there lets the service
+	// (running as LocalSystem) read files that Administrators created.
+	cfgDir := winConfigDir()
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := writeConfigExample(cfgDir); err != nil {
+		return fmt.Errorf("write config.yaml.example: %w", err)
+	}
+	tokenPath := filepath.Join(cfgDir, "token")
+	newToken, err := ensureTokenWin(tokenPath)
+	if err != nil {
+		return fmt.Errorf("bootstrap token: %w", err)
+	}
+
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect SCM: %w (run from elevated PowerShell)", err)
@@ -36,9 +51,9 @@ func install() error {
 	}
 
 	s, err := m.CreateService(svcName, exe, mgr.Config{
-		DisplayName:      "RedTorch Node Agent",
-		Description:      "Load visibility and unload-on-demand for RedTorch dispatcher",
-		StartType:        mgr.StartAutomatic,
+		DisplayName: "RedTorch Node Agent",
+		Description: "Load visibility and unload-on-demand for RedTorch dispatcher",
+		StartType:   mgr.StartAutomatic,
 	}, "run")
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
@@ -49,7 +64,42 @@ func install() error {
 		return fmt.Errorf("start service: %w", err)
 	}
 	fmt.Println("rt-node-agent installed and started (Windows Service)")
+	if newToken != "" {
+		fmt.Println()
+		fmt.Println("A bearer token was generated and written to " + tokenPath + ":")
+		fmt.Println("  " + newToken)
+		fmt.Println()
+		fmt.Println("The case-manager backend will use this token for POST /actions/*.")
+		fmt.Println("To rotate: Set-Content " + tokenPath + " <new-value>; Restart-Service rt-node-agent")
+	}
 	return nil
+}
+
+// winConfigDir returns %ProgramData%\rt-node-agent, falling back to the
+// conventional path if the env var is empty.
+func winConfigDir() string {
+	pd := os.Getenv("ProgramData")
+	if pd == "" {
+		pd = `C:\ProgramData`
+	}
+	return filepath.Join(pd, "rt-node-agent")
+}
+
+// ensureTokenWin writes a fresh token to path if missing. Relies on default
+// ProgramData ACLs to restrict read access to Administrators + LocalSystem,
+// which matches the account the service runs under by default.
+func ensureTokenWin(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		return "", nil
+	}
+	tok, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(tok+"\r\n"), 0o600); err != nil {
+		return "", err
+	}
+	return tok, nil
 }
 
 func uninstall() error {

@@ -59,6 +59,17 @@ func install() error {
 	if err := ensureDir(logDir, 0o755, agentUser, agentGroup); err != nil {
 		return err
 	}
+	if err := writeConfigExample(configDir); err != nil {
+		return fmt.Errorf("write config.yaml.example: %w", err)
+	}
+
+	// Token bootstrap: if no token exists, generate one. Otherwise leave it
+	// alone — reinstalls must not rotate secrets.
+	tokenPath := filepath.Join(configDir, "token")
+	newToken, err := ensureTokenLinux(tokenPath)
+	if err != nil {
+		return fmt.Errorf("bootstrap token: %w", err)
+	}
 
 	unit := fmt.Sprintf(unitTemplate, exe, agentUser, agentGroup, logDir, configDir)
 	if err := os.WriteFile(systemdUnitPath, []byte(unit), 0o644); err != nil {
@@ -71,7 +82,40 @@ func install() error {
 		return err
 	}
 	fmt.Println("rt-node-agent installed and started (systemd)")
+	if newToken != "" {
+		fmt.Println()
+		fmt.Println("A bearer token was generated and written to " + tokenPath + ":")
+		fmt.Println("  " + newToken)
+		fmt.Println()
+		fmt.Println("The case-manager backend will use this token for POST /actions/*.")
+		fmt.Println("To rotate: write a new value to the file (mode 640, root:" + agentGroup + ")")
+		fmt.Println("          then: sudo systemctl restart rt-node-agent")
+	}
 	return nil
+}
+
+// ensureTokenLinux writes a fresh token to path if missing. Returns the
+// new token (or "" if one was already present). Always re-applies correct
+// ownership and perms so a pre-existing mis-chmodded file gets healed on
+// reinstall — that was the v0.1.1 foot-gun.
+func ensureTokenLinux(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		// Heal perms on an existing token file without rotating the secret.
+		_ = run("chown", "root:"+agentGroup, path)
+		_ = os.Chmod(path, 0o640)
+		return "", nil
+	}
+	tok, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o640); err != nil {
+		return "", err
+	}
+	if err := run("chown", "root:"+agentGroup, path); err != nil {
+		return "", err
+	}
+	return tok, nil
 }
 
 func uninstall() error {

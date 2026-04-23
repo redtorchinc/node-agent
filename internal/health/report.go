@@ -76,9 +76,16 @@ func NewReporter(cfg config.Config) (*Reporter, error) {
 	}, nil
 }
 
-// StartBackground launches per-service allocator scrape loops. Returns
-// immediately; goroutines exit when ctx is cancelled.
+// StartBackground launches per-service allocator scrape loops and warms
+// the GPU probe cache so the first /health after start doesn't pay a
+// cold-cache latency spike. Warmup is bounded at 2s — on a hung
+// system_profiler or nvidia-smi we'd rather start serving /health with
+// empty gpus[] than delay the listener.
 func (r *Reporter) StartBackground(ctx context.Context) {
+	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	_, _ = r.GPU.Probe(wctx)
+	cancel()
+
 	for _, sc := range r.Cfg.ServiceAllocators {
 		s := allocators.New(sc, r.Allocators)
 		go s.Start(ctx)

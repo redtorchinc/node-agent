@@ -1,8 +1,8 @@
 # rt-node-agent
 
-A tiny HTTP agent that runs on every GPU/CPU node in the RedTorch fleet and gives the case-manager backend one place to look for load visibility, health gating, and on-demand VRAM freeing.
+A small HTTP agent that runs on every GPU/CPU node in the RedTorch fleet and gives the case-manager backend one place to look for load visibility, health gating, and on-demand VRAM freeing.
 
-See **[SPEC.md](./SPEC.md)** for the authoritative API contract.
+See **[SPEC.md](./SPEC.md)** for the authoritative API contract and **[PLAN.md](./PLAN.md)** for the implementation plan.
 
 ---
 
@@ -13,79 +13,154 @@ See **[SPEC.md](./SPEC.md)** for the authoritative API contract.
 - `GET /metrics` — Prometheus text format (behind `RT_AGENT_METRICS=1`).
 - `POST /actions/unload-model` — authenticated; frees a named Ollama model on demand.
 
-Listens on **port 11435** (deliberately adjacent to Ollama's 11434).
+Listens on **port 11435** (adjacent to Ollama's 11434).
 
 ---
 
 ## Install
 
-### Linux / macOS (one command)
+One command per OS. Each installs the binary, registers a native system service, and starts it.
+
+### Linux (systemd)
 
 ```sh
-curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sudo sh
 ```
 
-The script detects OS/arch, downloads the matching binary, places it in `/usr/local/bin/`, and registers it as a native service (systemd on Linux, launchd on macOS). Works on Ubuntu, Debian, Fedora, DGX OS, and macOS (Apple Silicon + Intel).
+Supported: Ubuntu, Debian, Fedora, DGX OS — `amd64` and `arm64`.
 
-### Windows (elevated PowerShell)
+What it does: downloads the matching binary to `/usr/local/bin/rt-node-agent`, creates the `rt-agent` system user, writes `/etc/systemd/system/rt-node-agent.service`, then `systemctl enable --now rt-node-agent`.
+
+Verify:
+
+```sh
+curl -s localhost:11435/version
+systemctl status rt-node-agent
+```
+
+### macOS (launchd)
+
+```sh
+curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sudo sh
+```
+
+Supported: macOS 12+ on Apple Silicon (`arm64`) and Intel (`amd64`).
+
+What it does: downloads the matching binary to `/usr/local/bin/rt-node-agent`, writes `/Library/LaunchDaemons/com.redtorch.rt-node-agent.plist`, then `launchctl bootstrap system …` to load and start it as a system daemon.
+
+Verify:
+
+```sh
+curl -s localhost:11435/version
+sudo launchctl print system/com.redtorch.rt-node-agent | head
+```
+
+**Gatekeeper note:** binaries downloaded by `curl` are not quarantined, so the install runs without security dialogs. If you download the binary manually via a browser, run this before first launch:
+
+```sh
+sudo xattr -dr com.apple.quarantine /usr/local/bin/rt-node-agent
+```
+
+### Windows (Service Control Manager)
+
+Open PowerShell **as Administrator** (right-click → Run as Administrator), then:
 
 ```powershell
 iwr -useb https://github.com/redtorchinc/node-agent/releases/latest/download/install.ps1 | iex
 ```
 
-Registers a native Windows Service via the SCM.
+Supported: Windows 10/11 and Windows Server — `amd64`.
 
-### Verify
+What it does: downloads the `.exe` to `C:\Program Files\RedTorch\rt-node-agent.exe`, registers it with the Windows Service Control Manager (`StartType = Automatic`), and starts it.
 
-```sh
-curl -s localhost:11435/health | jq '.degraded, .degraded_reasons'
+Verify:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:11435/version -UseBasicParsing
+Get-Service rt-node-agent
 ```
 
-If the node is healthy: `false` and `[]`.
+If `install.ps1` prints `must run from an elevated PowerShell`, the session isn't elevated — close it and reopen as Administrator.
+
+---
+
+## Verify the node is healthy
+
+Any OS:
+
+```sh
+curl -s http://localhost:11435/health
+```
+
+Look for `"degraded": false` and `"degraded_reasons": []`. See the [degraded_reasons quick reference](#degraded_reasons-quick-reference) below for the full vocabulary.
 
 ---
 
 ## Configuration
 
-Default config paths:
+### Config file location
 
-- Linux / macOS: `/etc/rt-node-agent/config.yaml`
-- Windows: `%ProgramData%\rt-node-agent\config.yaml`
+| OS       | Path                                          |
+|---       |---                                            |
+| Linux    | `/etc/rt-node-agent/config.yaml`              |
+| macOS    | `/etc/rt-node-agent/config.yaml`              |
+| Windows  | `%ProgramData%\rt-node-agent\config.yaml`     |
 
 Every field is optional. See [`examples/config.yaml`](./examples/config.yaml) for the full set with comments.
 
-| Env var              | Default              | Purpose |
-|---                   |---                   |---      |
-| `RT_AGENT_PORT`      | `11435`              | Listen port |
-| `RT_AGENT_BIND`      | `0.0.0.0`            | Bind address |
-| `RT_AGENT_TOKEN`     | *unset*              | Bearer token for `/actions/*` |
-| `RT_AGENT_CONFIG`    | platform default     | Config file path override |
-| `RT_AGENT_OLLAMA`    | `http://localhost:11434` | Ollama endpoint |
-| `RT_AGENT_METRICS`   | *unset*              | Set `1` to enable `/metrics` |
+### Environment variables (all OSes)
 
-### Enabling `/actions/*`
+| Variable             | Default                    | Purpose                                   |
+|---                   |---                         |---                                        |
+| `RT_AGENT_PORT`      | `11435`                    | Listen port                               |
+| `RT_AGENT_BIND`      | `0.0.0.0`                  | Bind address                              |
+| `RT_AGENT_TOKEN`     | *unset*                    | Bearer token for `/actions/*`             |
+| `RT_AGENT_CONFIG`    | platform default           | Config file path override                 |
+| `RT_AGENT_OLLAMA`    | `http://localhost:11434`   | Ollama endpoint                           |
+| `RT_AGENT_METRICS`   | *unset*                    | Set `1` to enable `/metrics`              |
 
-Read endpoints are open on the LAN by design (matches the air-gapped OPSEC model — no PII or case data flows through this agent). Mutating endpoints need a token:
+### Enable `/actions/*` (set a token)
+
+Read endpoints (`/health`, `/version`, `/metrics`) are open on the LAN by design — matches the air-gapped OPSEC model, no PII flows through this agent. Mutating endpoints need a Bearer token.
+
+Without a token configured, `POST /actions/*` returns **503 token not configured** — an intentional signal that the endpoint is not yet provisioned (vs. 401 which implies auth is set up and rejected).
+
+#### Linux
 
 ```sh
-# Generate and install a token on each node
 openssl rand -hex 32 | sudo tee /etc/rt-node-agent/token >/dev/null
 sudo chmod 600 /etc/rt-node-agent/token
 sudo chown root:rt-agent /etc/rt-node-agent/token
 sudo systemctl restart rt-node-agent
 ```
 
-Then the backend passes it as `Authorization: Bearer <token>`.
+#### macOS
 
-Without a token configured, `POST /actions/*` returns **503 token not configured** — intentional signal that the endpoint is not yet provisioned (vs. 401 which implies auth is set up and rejected).
+```sh
+openssl rand -hex 32 | sudo tee /etc/rt-node-agent/token >/dev/null
+sudo chmod 600 /etc/rt-node-agent/token
+sudo launchctl kickstart -k system/com.redtorch.rt-node-agent
+```
+
+#### Windows
+
+From elevated PowerShell:
+
+```powershell
+$token = -join (1..64 | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+$dir = "$env:ProgramData\rt-node-agent"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Set-Content -Path "$dir\token" -Value $token -NoNewline -Encoding ASCII
+Restart-Service rt-node-agent
+```
 
 ---
 
-## API quick reference
+## API reference
 
 Full JSON shape: **[SPEC.md §HTTP API](./SPEC.md)**.
 
-### `degraded_reasons` vocabulary
+### `degraded_reasons` quick reference
 
 | Reason | Severity | Trigger |
 |---|---|---|
@@ -106,15 +181,33 @@ Full JSON shape: **[SPEC.md §HTTP API](./SPEC.md)**.
 
 ## Uninstall
 
-```sh
-# Linux / macOS
-curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/uninstall.sh | sh
+Config files under `/etc/rt-node-agent/` (or `%ProgramData%\rt-node-agent\` on Windows) are **preserved** so a reinstall keeps the existing token. Delete them manually if you want a clean slate.
 
-# Windows (elevated PowerShell)
+### Linux
+
+```sh
+curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/uninstall.sh | sudo sh
+```
+
+Disables and stops the systemd unit, removes the unit file, and deletes the binary.
+
+### macOS
+
+```sh
+curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/uninstall.sh | sudo sh
+```
+
+Unloads and removes the launchd plist, and deletes the binary.
+
+### Windows
+
+From elevated PowerShell:
+
+```powershell
 iwr -useb https://github.com/redtorchinc/node-agent/releases/latest/download/uninstall.ps1 | iex
 ```
 
-Config and token files are preserved on uninstall so reinstalling doesn't rotate secrets. Pass `--purge` (future) or `rm -rf /etc/rt-node-agent` manually to wipe everything.
+Stops and deletes the Windows Service, and removes the `.exe`.
 
 ---
 
@@ -123,7 +216,7 @@ Config and token files are preserved on uninstall so reinstalling doesn't rotate
 ```sh
 git clone https://github.com/redtorchinc/node-agent.git
 cd node-agent
-make build           # local binary
+make build           # local binary for this OS/arch
 make cross           # all 5 targets into dist/
 make test            # unit tests (under 60s)
 ```
@@ -134,10 +227,10 @@ Requires Go 1.22+. No CGO, no non-Go build tooling.
 
 ## Security model
 
-- **LAN-only** by default. Read endpoints are open on the LAN; mutating endpoints require a Bearer token.
-- **No TLS in v1.** Assumes the air-gapped OPSEC model (nodes share a firewall with the backend). If you're deploying outside that model, terminate TLS in front of the agent or wait for v2 mTLS.
+- **LAN-only** by default. Read endpoints open; mutating endpoints require a Bearer token.
+- **No TLS in v1** (assumes air-gapped OPSEC — nodes share a firewall with the backend). If you're deploying outside that model, terminate TLS in front of the agent.
 - **No remote shell, no file read/write endpoints, ever.** The only mutating action is "unload this named Ollama model."
-- **No PII or case data** passes through this agent. It observes the host and talks to local Ollama only.
+- **No PII or case data** passes through this agent.
 
 See [SECURITY.md](./SECURITY.md) for supply-chain (signing, attestation) and disclosure policy.
 
@@ -145,30 +238,67 @@ See [SECURITY.md](./SECURITY.md) for supply-chain (signing, attestation) and dis
 
 ## Troubleshooting
 
-### `/health` shows `"ollama_down"` but Ollama is running
+### Any OS: `/health` shows `"ollama_down"` but Ollama is running
 
-Check `RT_AGENT_OLLAMA` — the default is `http://localhost:11434`. If Ollama was started with `OLLAMA_HOST=0.0.0.0:11434`, the agent still reaches it locally; if with a non-default port, override:
+Default Ollama endpoint is `http://localhost:11434`. If Ollama was started on a non-default port, override:
 
-```sh
-echo 'ollama_endpoint: http://localhost:11500' | sudo tee -a /etc/rt-node-agent/config.yaml
-sudo systemctl restart rt-node-agent
+```yaml
+# /etc/rt-node-agent/config.yaml (Linux/macOS)  |  %ProgramData%\rt-node-agent\config.yaml (Windows)
+ollama_endpoint: http://localhost:11500
 ```
 
-### GPU detection per platform
+Then restart the service (see the restart commands in [Configuration → Enable `/actions/*`](#enable-actions-set-a-token)).
 
-The agent auto-selects a GPU probe based on the host:
+### Any OS: GPU detection per platform
 
-- **Linux / Windows / Intel-Mac-with-eGPU** — shells out to `nvidia-smi`. If not on PATH, the `gpus` list is empty (not an error). Ensure the NVIDIA driver is installed and `nvidia-smi` is reachable by the service user (`rt-agent` on Linux).
-- **Apple Silicon** — uses `system_profiler SPDisplaysDataType`. No `nvidia-smi` required or expected. The `gpus` list contains one entry with the M-series chip name; per-process VRAM is not exposed (no public macOS API). `memory.unified: true` signals to the ranker that RAM pressure is the GPU-pressure signal on this class of host.
-- **Any host with no supported GPU stack** — `gpus: []`. Agent still serves `/health` correctly; the ranker can treat this as CPU-only.
+The agent auto-selects a GPU probe based on the host — no per-OS configuration needed:
 
-### Port 11435 not reachable from the backend
+- **Linux / Windows / Intel Mac + eGPU** — shells out to `nvidia-smi`. If not on PATH, `gpus: []` (not an error). Ensure the NVIDIA driver is installed and `nvidia-smi` is reachable by the service user.
+- **Apple Silicon** — uses `system_profiler SPDisplaysDataType`. **No `nvidia-smi` required or expected.** The `gpus` list contains one entry with the M-series chip name; per-process VRAM is not exposed (no public macOS API). `memory.unified: true` signals to the ranker that RAM pressure is the GPU-pressure signal on this class of host.
+- **Any host with no supported GPU stack** — `gpus: []`. Agent still serves `/health`; the ranker treats as CPU-only.
 
-The agent binds `0.0.0.0:11435` by default. If the backend still can't reach it, check the host firewall (`ufw`, `firewalld`, Windows Defender Firewall). The agent does not open firewall ports itself.
+### Linux
 
-### Windows service won't install
+```sh
+systemctl status rt-node-agent        # state + last log lines
+journalctl -u rt-node-agent -f        # live tail
+journalctl -u rt-node-agent --since '1 hour ago'
+```
 
-`install.ps1` must be run from an **elevated** PowerShell. The SCM refuses `CreateService` otherwise. Right-click PowerShell → Run as Administrator.
+If `install.sh` fails at `useradd`, you're not root — run with `sudo sh`, not `sh`.
+
+### macOS
+
+Log files (launchd writes to these, not to Console.app):
+
+```sh
+tail -f /var/log/rt-node-agent.log
+tail -f /var/log/rt-node-agent.err
+```
+
+Service state:
+
+```sh
+sudo launchctl print system/com.redtorch.rt-node-agent
+```
+
+If the service doesn't start and logs are empty, the binary was likely quarantined (downloaded via browser, not curl). Fix:
+
+```sh
+sudo xattr -dr com.apple.quarantine /usr/local/bin/rt-node-agent
+sudo launchctl kickstart -k system/com.redtorch.rt-node-agent
+```
+
+### Windows
+
+```powershell
+Get-Service rt-node-agent
+Get-EventLog -LogName Application -Source rt-node-agent -Newest 20
+```
+
+If `install.ps1` errors with **`must run from an elevated PowerShell`**, the session isn't elevated. Close and reopen PowerShell via right-click → Run as Administrator. The Service Control Manager refuses `CreateService` from non-elevated processes.
+
+If port 11435 isn't reachable from the case-manager, check Windows Defender Firewall — the agent binds `0.0.0.0:11435` but does not open the port itself.
 
 ---
 

@@ -1,9 +1,14 @@
 #!/bin/sh
-# install.sh — curl|sh bootstrap for rt-node-agent on Linux and macOS.
+# install.sh — bootstrap rt-node-agent on Linux and macOS.
 #
-# Usage:
-#   curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sh
-#   curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | RT_AGENT_VERSION=v0.1.0 sh
+# Usage (both distros):
+#   curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sudo sh
+#   curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/install.sh | sudo RT_AGENT_VERSION=v0.1.0 sh
+#
+# Must run as root — it writes to /usr/local/bin and registers a system
+# service (systemd on Linux, launchd on macOS). Running via `curl | sh`
+# without sudo breaks when /usr/local/bin isn't user-writable because
+# the pipe has no tty for sudo's password prompt.
 #
 # Idempotent. Does not generate a token (operator sets /etc/rt-node-agent/token
 # after install). Exits non-zero on any failure.
@@ -17,6 +22,11 @@ VERSION="${RT_AGENT_VERSION:-latest}"
 
 err() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 info() { printf 'install.sh: %s\n' "$*"; }
+
+# --- root check ---
+if [ "$(id -u)" -ne 0 ]; then
+  err "must run as root. Retry: curl -fsSL <url>/install.sh | sudo sh"
+fi
 
 # --- detect OS/arch ---
 uname_s=$(uname -s)
@@ -48,46 +58,39 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-info "downloading $asset"
+info "downloading $asset ($os/$arch)"
 curl -fsSL -o "$tmp/$asset" "$url" || err "download failed: $url"
 
-# Signature verification is best-effort: if minisign isn't available, warn
-# but continue. Hard-fail once minisign is standard on target hosts.
+# --- optional signature verification ---
+# When minisign is installed AND a .minisig asset is published, verify.
+# When either is missing, warn and continue (v0.1.0 releases are unsigned).
 if command -v minisign >/dev/null 2>&1; then
   if curl -fsSL -o "$tmp/$asset.minisig" "$sig_url" 2>/dev/null; then
-    # The public key is pinned here; any rotation requires a new install.sh.
-    pubkey="RWS_PLACEHOLDER_PUBKEY_REPLACE_AT_FIRST_RELEASE_TAG"
+    pubkey="RWS_PLACEHOLDER_PUBKEY_REPLACE_AT_FIRST_SIGNED_RELEASE"
     printf '%s\n' "$pubkey" > "$tmp/rt-node-agent.pub"
     if ! minisign -V -p "$tmp/rt-node-agent.pub" -m "$tmp/$asset" >/dev/null 2>&1; then
       err "signature verification failed for $asset"
     fi
     info "signature verified"
   else
-    info "no signature published yet (pre-M11); skipping verify"
+    info "no signature published for this release; skipping verify"
   fi
 else
-  info "minisign not installed; skipping signature verification (install minisign to harden)"
+  info "minisign not installed; skipping signature verification"
 fi
 
-# --- install ---
+# --- install binary ---
 chmod +x "$tmp/$asset"
-if [ -w "$INSTALL_DIR" ]; then
-  mv "$tmp/$asset" "$INSTALL_DIR/$BINARY"
-else
-  info "installing to $INSTALL_DIR requires sudo"
-  sudo install -m 0755 "$tmp/$asset" "$INSTALL_DIR/$BINARY"
-fi
+install -m 0755 "$tmp/$asset" "$INSTALL_DIR/$BINARY"
+info "installed $INSTALL_DIR/$BINARY"
 
-# --- register service ---
+# --- register system service ---
+# `rt-node-agent install` dispatches to internal/service/{systemd.go,launchd.go}
+# based on the build-tag — systemd on Linux, launchd on macOS.
 info "registering system service"
-if [ "$(id -u)" -eq 0 ]; then
-  "$INSTALL_DIR/$BINARY" install
-else
-  sudo "$INSTALL_DIR/$BINARY" install
-fi
+"$INSTALL_DIR/$BINARY" install
 
 # --- healthcheck ---
-# Give the service a moment to bind the port, then verify.
 sleep 1
 port=${RT_AGENT_PORT:-11435}
 if curl -fsS "http://127.0.0.1:${port}/version" >/dev/null 2>&1; then
@@ -96,5 +99,5 @@ else
   err "rt-node-agent did not respond on port ${port}; check service logs"
 fi
 
-info "done. /health: http://127.0.0.1:${port}/health"
-info "next: write a token to $( [ "$os" = darwin ] && echo /etc/rt-node-agent/token || echo /etc/rt-node-agent/token ) to enable /actions/*"
+info "done. health: http://127.0.0.1:${port}/health"
+info "next: echo <token> | sudo tee /etc/rt-node-agent/token  (then restart service) to enable /actions/*"

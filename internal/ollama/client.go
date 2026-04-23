@@ -26,12 +26,16 @@ type Info struct {
 }
 
 // Model mirrors the fields we care about from Ollama's /api/ps response.
+// QueuedRequests is 0 when the serving Ollama doesn't expose the field —
+// the agent treats absent/zero as "no evidence of queue" and refuses to
+// fire ollama_runner_stuck without it.
 type Model struct {
-	Name      string `json:"name"`
-	SizeMB    int64  `json:"size_mb"`
-	Processor string `json:"processor"`
-	Context   int    `json:"context"`
-	UntilS    int64  `json:"until_s"`
+	Name           string `json:"name"`
+	SizeMB         int64  `json:"size_mb"`
+	Processor      string `json:"processor"`
+	Context        int    `json:"context"`
+	UntilS         int64  `json:"until_s"`
+	QueuedRequests int    `json:"queued_requests"`
 }
 
 // Runner describes one `ollama runner` subprocess.
@@ -121,6 +125,10 @@ type psModel struct {
 	// size == size_vram; otherwise it's a split. We compute "processor"
 	// heuristically from these two values.
 	SizeVRAM int64 `json:"size_vram"`
+	// QueuedRequests is not present on all Ollama versions. Missing JSON
+	// keys leave the int zero-valued, which the degraded evaluator reads
+	// as "no queue visible" — matches the intent of not false-positiving.
+	QueuedRequests int `json:"queued_requests"`
 }
 
 func (c *Client) fetchPs(ctx context.Context) ([]Model, error) {
@@ -157,11 +165,12 @@ func (c *Client) fetchPs(ctx context.Context) ([]Model, error) {
 			}
 		}
 		out = append(out, Model{
-			Name:      name,
-			SizeMB:    m.Size / 1024 / 1024,
-			Processor: processor(m.Size, m.SizeVRAM),
-			Context:   m.Details.Context,
-			UntilS:    until,
+			Name:           name,
+			SizeMB:         m.Size / 1024 / 1024,
+			Processor:      processor(m.Size, m.SizeVRAM),
+			Context:        m.Details.Context,
+			UntilS:         until,
+			QueuedRequests: m.QueuedRequests,
 		})
 	}
 	return out, nil

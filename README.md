@@ -184,7 +184,7 @@ Full JSON shape: **[SPEC.md §HTTP API](./SPEC.md)**.
 | `swap_over_50pct` | soft | Deprioritize |
 | `vram_over_90pct` | soft | Deprioritize |
 | `load_avg_over_2x_cores` | soft | CPU saturated |
-| `ollama_runner_stuck` | soft | Runner PID at 0% CPU with a model loaded |
+| `ollama_runner_stuck` | soft | Runner PID at 0% CPU **and** at least one model reports `queued_requests > 0` |
 | `vram_service_creep_warn` | soft | Early leak signal (ratio > 2.0 AND reserved > `threshold_warn_mb`) |
 
 **Hard reasons flip `degraded: true` and tell the ranker to skip the node.** Additive changes to this list are safe; renames are breaking.

@@ -141,11 +141,23 @@ func serviceCreep(r Report, level creepLevel) bool {
 }
 
 // runnerStuck implements `ollama_runner_stuck`: runner PID exists, CPU 0%,
-// and we have pending work. We can't see "queued requests" from here, so
-// v1 only flags when CPUPct is near zero while at least one model is loaded.
-// Refine once we have a queue-depth signal.
+// AND at least one model reports queued_requests > 0. Historically v1
+// approximated the second clause with "any model loaded," which falsely
+// flagged every warm idle runner (see issue #1). Now we require real
+// queue-depth evidence before firing.
+//
+// Ollama versions that don't expose queued_requests in /api/ps leave the
+// field at 0, which means the check never fires — deliberate: better to
+// under-detect than to false-positive and deprioritize healthy nodes.
 func runnerStuck(r Report) bool {
-	if len(r.Ollama.Models) == 0 {
+	if len(r.Ollama.Runners) == 0 {
+		return false
+	}
+	queued := 0
+	for _, m := range r.Ollama.Models {
+		queued += m.QueuedRequests
+	}
+	if queued == 0 {
 		return false
 	}
 	for _, rn := range r.Ollama.Runners {

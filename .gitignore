@@ -1,0 +1,52 @@
+# Binaries and build output
+/rt-node-agent
+/rt-node-agent.exe
+/bin/
+/dist/
+/build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage
+*.test
+*.out
+coverage.*
+/vendor/
+
+# Secrets — see CLAUDE.md §Public-repo hygiene
+# Never commit tokens, keys, or any /etc/rt-node-agent/token content
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+token
+token.txt
+*.token
+secrets/
+/etc/
+
+# Release signing material (cosign/minisign private keys)
+*.priv
+cosign.key
+minisign.key
+
+# Local dev config that may contain real node URLs or tokens
+config.local.*
+/config.yaml
+!examples/config.yaml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local settings (may contain user-specific paths/tokens)
+.claude/settings.local.json

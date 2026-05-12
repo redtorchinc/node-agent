@@ -29,6 +29,7 @@ token.txt
 *.token
 secrets/
 /etc/
+/var/
 
 # Release signing material (cosign/minisign private keys)
 *.priv
@@ -40,6 +41,19 @@ config.local.*
 /config.yaml
 !examples/config.yaml
 
+# Operator working files — produced by `config migrate` or hand-edits.
+# A *.new file represents an unreviewed config diff; not committable.
+*.yaml.new
+*.yaml.bak
+config.yaml.new
+training_mode.json
+
+# Scratch markdown (anything starting with a space, or named scratch.*)
+# Keeps accidental operator notes out of commits.
+[ ]*.md
+scratch.*
+SCRATCH.*
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -48,5 +62,8 @@ Thumbs.db
 *.swp
 *~
 
-# Claude Code local settings (may contain user-specific paths/tokens)
+# Claude Code local settings (may contain user-specific paths/tokens).
+# Note: CLAUDE.md itself IS committed — it documents the public contract
+# and is content-equivalent to CONTRIBUTING.md. Nothing sensitive there.
 .claude/settings.local.json
+.claude/*.local.*

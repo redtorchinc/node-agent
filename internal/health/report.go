@@ -23,41 +23,136 @@ import (
 	"github.com/redtorchinc/node-agent/internal/gpu"
 	"github.com/redtorchinc/node-agent/internal/mem"
 	"github.com/redtorchinc/node-agent/internal/ollama"
+	"github.com/redtorchinc/node-agent/internal/platforms"
+	pollama "github.com/redtorchinc/node-agent/internal/platforms/ollama"
+	"github.com/redtorchinc/node-agent/internal/platforms/vllm"
+	"github.com/redtorchinc/node-agent/internal/rdma"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/network"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/timesync"
 )
 
 // Report is the full /health JSON payload.
 type Report struct {
-	Ts              int64                 `json:"ts"`
-	Hostname        string                `json:"hostname"`
-	OS              string                `json:"os"`
-	Arch            string                `json:"arch"`
-	AgentVersion    string                `json:"agent_version"`
-	UptimeS         int64                 `json:"uptime_s"`
-	CPU             CPUInfo               `json:"cpu"`
-	Memory          mem.Info              `json:"memory"`
-	GPUs            []gpu.GPU             `json:"gpus"`
-	ServiceAllocs   []allocators.Scraped  `json:"service_allocators"`
-	Ollama          ollama.Info           `json:"ollama"`
-	Degraded        bool                  `json:"degraded"`
-	DegradedReasons []string              `json:"degraded_reasons"`
+	Ts           int64  `json:"ts"`
+	Hostname     string `json:"hostname"`
+	OS           string `json:"os"`
+	Arch         string `json:"arch"`
+	AgentVersion string `json:"agent_version"`
+	UptimeS      int64  `json:"uptime_s"`
+
+	CPU    CPUInfo   `json:"cpu"`
+	Memory mem.Info  `json:"memory"`
+	GPUs   []gpu.GPU `json:"gpus"`
+
+	// Disk and Network are v0.2.0 additions. Empty arrays when not measurable.
+	Disk    []disk.Info       `json:"disk"`
+	Network network.Info      `json:"network"`
+	TimeSync *timesync.Info   `json:"time_sync,omitempty"`
+
+	ServiceAllocs []allocators.Scraped `json:"service_allocators"`
+
+	// Platforms is the v0.2.0 home for inference-platform state. Keyed by
+	// platform name (ollama, vllm). Empty map when nothing is configured.
+	Platforms map[string]platforms.Report `json:"platforms"`
+
+	// Services lists state for allowlisted units (POST /actions/service).
+	// Always emitted (possibly empty) — its presence tells the backend the
+	// agent supports remote service control.
+	Services []ServiceState `json:"services"`
+
+	// Ollama is the legacy v0.1.x field. Kept as an alias of platforms.ollama
+	// for the duration of v0.2.x. Removed in v0.3.0.
+	Ollama ollama.Info `json:"ollama"`
+
+	// RDMA is populated on Linux hosts with /sys/class/infiniband present.
+	// Omitted from /health entirely (nil) when no IB devices exist.
+	RDMA *rdma.Info `json:"rdma,omitempty"`
+
+	// Mode and Training are Phase B; populated only when training-mode is
+	// engaged. Always emitted: Mode defaults to "idle"/"inference".
+	Mode     string         `json:"mode"`
+	Training *TrainingState `json:"training,omitempty"`
+
+	Degraded        bool     `json:"degraded"`
+	DegradedReasons []string `json:"degraded_reasons"`
 }
 
-// CPUInfo mirrors /health.cpu.
+// ServiceState is one allowlisted unit's state, surfaced under /health.services[].
+// Populated by the services package; defined here so the JSON contract is
+// in one place.
+type ServiceState struct {
+	Unit        string `json:"unit"`
+	ActiveState string `json:"active_state,omitempty"`
+	SubState    string `json:"sub_state,omitempty"`
+	MainPID     int    `json:"main_pid,omitempty"`
+	MemoryMB    int64  `json:"memory_mb,omitempty"`
+}
+
+// TrainingState is /health.training, present only when mode = training_mode.
+// It surfaces what the agent will reload on exit (config-driven, advisory)
+// and the run-id under which training was entered.
+type TrainingState struct {
+	RunID                 string   `json:"run_id"`
+	EnteredAt             int64    `json:"entered_at"`
+	ExpectedDurationS     int64    `json:"expected_duration_s,omitempty"`
+	OllamaModelsReleased  []string `json:"ollama_models_released"`
+	OllamaModelsToRestore []string `json:"ollama_models_to_restore"`
+}
+
+// ModeReporter exposes the mode-state-machine snapshot to the health
+// reporter without an import cycle. Implementations live in internal/mode.
+type ModeReporter interface {
+	Mode() string
+	Training() *TrainingState
+}
+
+// CPUInfo mirrors /health.cpu. v0.2.0 adds model/vendor/usage_pct/freq/temps
+// as additive fields; v0.1.x clients ignore them.
 type CPUInfo struct {
-	CoresPhysical int     `json:"cores_physical"`
-	CoresLogical  int     `json:"cores_logical"`
-	Load1m        float64 `json:"load_1m"`
-	Load5m        float64 `json:"load_5m"`
-	Load15m       float64 `json:"load_15m"`
+	Model           string  `json:"model,omitempty"`
+	Vendor          string  `json:"vendor,omitempty"`
+	CoresPhysical   int     `json:"cores_physical"`
+	CoresLogical    int     `json:"cores_logical"`
+	FreqMHzCurrent  *int    `json:"freq_mhz_current,omitempty"`
+	FreqMHzMin      *int    `json:"freq_mhz_min,omitempty"`
+	FreqMHzMax      *int    `json:"freq_mhz_max,omitempty"`
+	UsagePct        *float64 `json:"usage_pct,omitempty"`
+	UsagePerCorePct []float64 `json:"usage_per_core_pct,omitempty"`
+	Load1m          float64 `json:"load_1m"`
+	Load5m          float64 `json:"load_5m"`
+	Load15m         float64 `json:"load_15m"`
+	TempsC          []TempSensor `json:"temps_c,omitempty"`
+	Throttled       *bool   `json:"throttled,omitempty"`
+	ThrottleReasons []string `json:"throttle_reasons,omitempty"`
+}
+
+// TempSensor is one (sensor-name, value-in-celsius) reading. Sensor names
+// are platform-specific (Tctl, core0, cpu_thermal, etc) — passed through
+// verbatim so operators recognise them.
+type TempSensor struct {
+	Sensor string  `json:"sensor"`
+	Value  float64 `json:"value"`
+}
+
+// ServicesReporter is the optional source of /health.services[].
+// Implementations live in internal/services; the Reporter holds an
+// interface here to avoid an import cycle.
+type ServicesReporter interface {
+	Snapshot(ctx context.Context) []ServiceState
 }
 
 // Reporter builds Reports on demand. Construct via NewReporter; safe for
 // concurrent Report() calls.
 type Reporter struct {
-	Cfg         config.Config
-	GPU         gpu.Probe
-	Ollama      *ollama.Client
-	Allocators  *allocators.Store
+	Cfg        config.Config
+	GPU        gpu.Probe
+	Ollama     *ollama.Client
+	Allocators *allocators.Store
+
+	platforms []platforms.Platform // detectors in stable order
+	services  ServicesReporter
+	mode      ModeReporter
 
 	start time.Time
 	now   func() time.Time
@@ -66,15 +161,29 @@ type Reporter struct {
 // NewReporter wires a Reporter from config. Side-effects: starts per-service
 // allocator scrape goroutines (tied to ctx from Run, plumbed via Start).
 func NewReporter(cfg config.Config) (*Reporter, error) {
-	return &Reporter{
+	r := &Reporter{
 		Cfg:        cfg,
 		GPU:        gpu.Select(),
-		Ollama:     ollama.NewClient(cfg.OllamaEndpoint),
+		Ollama:     ollama.NewClient(cfg.Platforms.Ollama.Endpoint),
 		Allocators: allocators.NewStore(),
 		start:      time.Now(),
 		now:        time.Now,
-	}, nil
+	}
+	r.platforms = []platforms.Platform{
+		pollama.New(cfg.Platforms.Ollama),
+		vllm.New(cfg.Platforms.VLLM),
+	}
+	return r, nil
 }
+
+// SetServicesReporter wires the services snapshot source. Optional; when
+// nil, /health.services is the empty array.
+func (r *Reporter) SetServicesReporter(s ServicesReporter) { r.services = s }
+
+// SetModeReporter wires the mode-state-machine snapshot source. Optional;
+// when nil, /health.mode falls back to "idle" / "inference" derived from
+// platforms[].models.
+func (r *Reporter) SetModeReporter(m ModeReporter) { r.mode = m }
 
 // StartBackground launches per-service allocator scrape loops and warms
 // the GPU probe cache so the first /health after start doesn't pay a
@@ -88,9 +197,23 @@ func (r *Reporter) StartBackground(ctx context.Context) {
 
 	for _, sc := range r.Cfg.ServiceAllocators {
 		s := allocators.New(sc, r.Allocators)
+		// Wire only_when_mode through the mode reporter so the scrape loop
+		// skips when the mode doesn't match. r.mode may still be nil when
+		// the server hasn't called SetModeReporter yet; the scraper handles
+		// a nil oracle as "never mode-active" for safety.
+		if r.mode != nil {
+			s = s.WithMode(modeOracleFunc(r.mode.Mode))
+		}
 		go s.Start(ctx)
 	}
 }
+
+// modeOracleFunc adapts a Mode() callback to the allocators.ModeOracle
+// interface so we can pass a method value without an intermediate struct.
+type modeOracleFunc func() string
+
+// Mode implements allocators.ModeOracle.
+func (f modeOracleFunc) Mode() string { return f() }
 
 // Report builds a fresh Report. It applies its own inner timeout to each
 // probe so one slow probe (e.g. nvidia-smi hung) cannot stall /health
@@ -108,7 +231,6 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	if up, err := host.Uptime(); err == nil {
 		rep.UptimeS = int64(up)
 	} else {
-		// Fall back to agent uptime if host uptime fails.
 		rep.UptimeS = int64(r.now().Sub(r.start).Seconds())
 	}
 
@@ -130,9 +252,47 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 		rep.ServiceAllocs = []allocators.Scraped{}
 	}
 
+	// Platforms — gather concurrently? Keep sequential for simplicity, each
+	// detector has its own 2s timeout and 5s response cache.
+	rep.Platforms = map[string]platforms.Report{}
+	for _, p := range r.platforms {
+		pCtx, pCancel := context.WithTimeout(ctx, 2*time.Second)
+		rep.Platforms[p.Name()] = p.Probe(pCtx)
+		pCancel()
+	}
+
+	// Keep the legacy /health.ollama field populated so v0.1.x backends
+	// continue to work unchanged. New consumers should switch to platforms.
 	oCtx, oCancel := context.WithTimeout(ctx, 2*time.Second)
 	rep.Ollama = r.Ollama.Probe(oCtx)
 	oCancel()
+
+	rep.Disk = disk.Probe(r.Cfg.Disk.Paths)
+	if rep.Disk == nil {
+		rep.Disk = []disk.Info{}
+	}
+	rep.Network = network.Probe()
+
+	if ts := timesync.Probe(ctx); ts != nil {
+		rep.TimeSync = ts
+	}
+
+	rep.Services = []ServiceState{}
+	if r.services != nil {
+		sCtx, sCancel := context.WithTimeout(ctx, 2*time.Second)
+		rep.Services = r.services.Snapshot(sCtx)
+		sCancel()
+		if rep.Services == nil {
+			rep.Services = []ServiceState{}
+		}
+	}
+
+	rep.RDMA = rdma.Probe(ctx)
+
+	rep.Mode = deriveMode(rep, r.mode)
+	if r.mode != nil {
+		rep.Training = r.mode.Training()
+	}
 
 	deg, reasons := Evaluate(rep, r.Cfg, r.now())
 	rep.Degraded = deg
@@ -157,11 +317,66 @@ func probeCPU() CPUInfo {
 		c.Load5m = round2(l.Load5)
 		c.Load15m = round2(l.Load15)
 	}
+	if infos, err := cpu.Info(); err == nil && len(infos) > 0 {
+		c.Model = infos[0].ModelName
+		c.Vendor = infos[0].VendorID
+		if mhz := infos[0].Mhz; mhz > 0 {
+			cur := int(mhz)
+			c.FreqMHzCurrent = &cur
+		}
+	}
+	// usage_pct: gopsutil's cpu.Percent(0,…) returns instantaneous; "0"
+	// interval means delta-since-last-call, which on a fresh agent yields
+	// 0. Tiny 100ms sample is acceptable for /health (cached upstream).
+	if pct, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(pct) > 0 {
+		v := round2(pct[0])
+		c.UsagePct = &v
+	}
+	if per, err := cpu.Percent(0, true); err == nil && len(per) > 0 {
+		c.UsagePerCorePct = make([]float64, len(per))
+		for i, v := range per {
+			c.UsagePerCorePct[i] = round2(v)
+		}
+	}
+	if temps, err := host.SensorsTemperatures(); err == nil {
+		for _, t := range temps {
+			if t.Temperature <= 0 {
+				continue
+			}
+			c.TempsC = append(c.TempsC, TempSensor{
+				Sensor: t.SensorKey,
+				Value:  round2(t.Temperature),
+			})
+		}
+	}
 	return c
 }
 
 func round2(f float64) float64 {
 	return float64(int(f*100+0.5)) / 100
+}
+
+// deriveMode resolves the wire value for /health.mode. When a ModeReporter
+// is wired (Phase B), its answer wins (it carries the explicit
+// "training_mode" state). Without one, the agent derives:
+//
+//	- "inference" if any platform reports a loaded model
+//	- "idle"      otherwise
+func deriveMode(rep Report, m ModeReporter) string {
+	if m != nil {
+		if v := m.Mode(); v != "" {
+			return v
+		}
+	}
+	for _, p := range rep.Platforms {
+		if len(p.Models) > 0 {
+			return "inference"
+		}
+	}
+	if len(rep.Ollama.Models) > 0 {
+		return "inference"
+	}
+	return "idle"
 }
 
 // ErrNotReady is returned when Report() is called before the background
@@ -171,6 +386,6 @@ var ErrNotReady = errors.New("reporter not ready")
 
 // String is convenient for log lines.
 func (r Report) String() string {
-	return fmt.Sprintf("host=%s os=%s/%s gpus=%d ollama=%v degraded=%v reasons=%v",
-		r.Hostname, r.OS, r.Arch, len(r.GPUs), r.Ollama.Up, r.Degraded, r.DegradedReasons)
+	return fmt.Sprintf("host=%s os=%s/%s gpus=%d ollama=%v platforms=%d degraded=%v reasons=%v",
+		r.Hostname, r.OS, r.Arch, len(r.GPUs), r.Ollama.Up, len(r.Platforms), r.Degraded, r.DegradedReasons)
 }

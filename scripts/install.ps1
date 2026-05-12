@@ -66,6 +66,16 @@ try {
 
     Say "done. /health: http://127.0.0.1:$port/health"
     Say "the bearer token above is what the case-manager backend uses for POST /actions/*."
+
+    # Surface new config keys if migrate dropped a .new file.
+    $cfgNew = Join-Path $env:ProgramData 'rt-node-agent\config.yaml.new'
+    if (Test-Path $cfgNew) {
+        Say ''
+        Say '*** new config keys available — review and merge: ***'
+        Say "    Compare-Object (gc $env:ProgramData\rt-node-agent\config.yaml) (gc $cfgNew)"
+        Say "    Move-Item -Force $cfgNew $env:ProgramData\rt-node-agent\config.yaml"
+        Say '    Restart-Service rt-node-agent'
+    }
 } finally {
     Remove-Item -Recurse -Force $tmp.FullName -ErrorAction SilentlyContinue
 }

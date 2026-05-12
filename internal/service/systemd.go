@@ -63,6 +63,20 @@ func install() error {
 		return fmt.Errorf("write config.yaml.example: %w", err)
 	}
 
+	// If an existing config.yaml is present and the schema has moved on,
+	// drop a config.yaml.new alongside it with the new keys commented in.
+	// Never modifies the operator's existing config in place.
+	runConfigMigrate(filepath.Join(configDir, "config.yaml"))
+
+	// Install sudoers drop-in so the agent (running as rt-agent) can act on
+	// rt-vllm-*.service units via POST /actions/service. Strictly limited
+	// pattern; see internal/services/sudoers.go.
+	if err := installSudoersDropIn(); err != nil {
+		// Non-fatal: the agent still works; only /actions/service will fail
+		// with a permission error until the operator places the drop-in.
+		fmt.Fprintf(os.Stderr, "warn: sudoers drop-in: %v\n", err)
+	}
+
 	// Token bootstrap: if no token exists, generate one. Otherwise leave it
 	// alone — reinstalls must not rotate secrets.
 	tokenPath := filepath.Join(configDir, "token")
@@ -128,6 +142,8 @@ func uninstall() error {
 		return err
 	}
 	_ = run("systemctl", "daemon-reload")
+	// Remove sudoers drop-in so a clean uninstall leaves no orphan grants.
+	_ = removeSudoersDropIn()
 	// Config + token preserved by design (see PLAN.md §M9).
 	fmt.Println("rt-node-agent uninstalled (config preserved at " + configDir + ")")
 	return nil

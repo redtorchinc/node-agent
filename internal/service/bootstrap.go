@@ -6,57 +6,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/redtorchinc/node-agent/internal/config"
+	"github.com/redtorchinc/node-agent/internal/config/migrate"
 )
-
-// configExampleTemplate is dropped into the config directory on first install
-// so operators can `cp config.yaml.example config.yaml` and edit instead of
-// hunting through the repo for the example.
-//
-// Kept in source rather than go:embed so a single file change stays obvious
-// in PRs; sync with examples/config.yaml when this changes.
-const configExampleTemplate = `# rt-node-agent config — copy to config.yaml and edit.
-# Every field is optional — defaults match SPEC.md §HTTP API.
-
-# HTTP listener.
-# port: 11435
-# bind: 0.0.0.0
-
-# Bearer token for POST /actions/*. The installer generates one at
-# /etc/rt-node-agent/token (Linux/macOS) or %ProgramData%\rt-node-agent\token
-# (Windows) automatically. To use a custom token, write it to that path with
-# the right perms (640 root:rt-agent on Linux, 600 on macOS) and restart.
-# Uncomment to override via this file instead of the token file:
-# token: "inline-only-for-dev"
-# token_file: /etc/rt-node-agent/token
-
-# Local Ollama endpoint. Override if Ollama listens on a non-default host.
-# ollama_endpoint: http://localhost:11434
-
-# Expose /metrics in Prometheus text format. Off by default.
-# metrics_enabled: false
-
-# Optional: scrape cooperating services that expose PyTorch allocator JSON.
-# See SPEC.md §"Service allocator scraping" for the contract. Both thresholds
-# must be exceeded for the corresponding degraded reason to fire:
-#   reserved/allocated > 3.0 AND reserved_mb > threshold_critical_mb → vram_service_creep_critical
-#   reserved/allocated > 2.0 AND reserved_mb > threshold_warn_mb     → vram_service_creep_warn
-# service_allocators:
-#   - name: gliner2-service
-#     url: http://localhost:8077/v1/debug/gpu
-#     threshold_warn_mb: 4096
-#     threshold_critical_mb: 10240
-#     scrape_interval_s: 30
-`
 
 // writeConfigExample drops config.yaml.example into dir if missing. Idempotent —
 // never overwrites, so operator edits to an existing example survive reinstall.
 // The real config.yaml is left untouched; this is a template only.
+//
+// Sources the content from config.DefaultYAML so the example, the migrate
+// reference, and the in-memory defaults all agree.
 func writeConfigExample(dir string) error {
 	p := filepath.Join(dir, "config.yaml.example")
 	if _, err := os.Stat(p); err == nil {
 		return nil
 	}
-	return os.WriteFile(p, []byte(configExampleTemplate), 0o644)
+	return os.WriteFile(p, []byte(config.DefaultYAML), 0o644)
+}
+
+// runConfigMigrate is called from the OS-specific install() right after the
+// agent user/dirs are in place. If /etc/rt-node-agent/config.yaml exists
+// and is older than the current schema (or has missing top-level keys),
+// it writes /etc/rt-node-agent/config.yaml.new with the missing keys
+// commented in, and prints a banner pointing the operator at the diff.
+//
+// Never overwrites the existing config — the merge requires operator review.
+// Token file is untouched.
+func runConfigMigrate(configPath string) {
+	res, err := migrate.Migrate(configPath, config.DefaultYAML)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config migrate: %v\n", err)
+		return
+	}
+	if banner := res.Banner(configPath); banner != "" {
+		fmt.Print(banner)
+	}
 }
 
 // generateToken returns a 64-char hex-encoded 32-byte random token — the same

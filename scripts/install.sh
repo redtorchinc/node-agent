@@ -101,3 +101,16 @@ fi
 
 info "done. health: http://127.0.0.1:${port}/health"
 info "the bearer token above is what the case-manager backend uses for POST /actions/*."
+
+# --- config migration banner ---
+# `rt-node-agent install` runs the migration internally and drops
+# /etc/rt-node-agent/config.yaml.new alongside the existing config when
+# new schema keys are available. Surface that here so operators don't
+# need to dig through service logs to discover it.
+if [ -f /etc/rt-node-agent/config.yaml.new ]; then
+  info ""
+  info "*** new config keys available — review and merge: ***"
+  info "    diff /etc/rt-node-agent/config.yaml /etc/rt-node-agent/config.yaml.new"
+  info "    sudo mv /etc/rt-node-agent/config.yaml.new /etc/rt-node-agent/config.yaml"
+  info "    sudo systemctl restart rt-node-agent"
+fi

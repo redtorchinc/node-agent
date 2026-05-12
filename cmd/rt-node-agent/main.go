@@ -15,6 +15,7 @@ import (
 
 	"github.com/redtorchinc/node-agent/internal/buildinfo"
 	"github.com/redtorchinc/node-agent/internal/config"
+	"github.com/redtorchinc/node-agent/internal/config/migrate"
 	"github.com/redtorchinc/node-agent/internal/health"
 	"github.com/redtorchinc/node-agent/internal/server"
 	"github.com/redtorchinc/node-agent/internal/service"
@@ -26,15 +27,16 @@ Usage:
   rt-node-agent <command>
 
 Commands:
-  run          Run the HTTP server in the foreground (default)
-  install      Install as a native service (systemd/launchd/Windows SCM)
-  uninstall    Remove the native service
-  status       Print service state
-  start        Start an installed service
-  stop         Stop an installed service
-  version      Print version info
-  healthcheck  Run /health logic once and exit (0=healthy, 1=degraded)
-  update       Replace the binary from the latest release and restart the service
+  run             Run the HTTP server in the foreground (default)
+  install         Install as a native service (systemd/launchd/Windows SCM)
+  uninstall       Remove the native service
+  status          Print service state
+  start           Start an installed service
+  stop            Stop an installed service
+  version         Print version info
+  healthcheck     Run /health logic once and exit (0=healthy, 1=degraded)
+  config migrate  Surface new config keys as a commented diff (writes .new file)
+  update          Replace the binary from the latest release and restart the service
 
 Environment:
   RT_AGENT_PORT       Listen port (default 11435)
@@ -88,6 +90,8 @@ func dispatch(cmd string, args []string) error {
 		return printVersion()
 	case "healthcheck":
 		return runHealthcheck()
+	case "config":
+		return runConfigCommand(args)
 	case "update":
 		return fmt.Errorf("update: not implemented yet; re-run install.sh to upgrade")
 	case "help", "--help", "-h":
@@ -159,6 +163,42 @@ func runHealthcheck() error {
 	}
 	return nil
 }
+
+// runConfigCommand dispatches subcommands under `rt-node-agent config ...`.
+// Currently exposes one subcommand:
+//
+//	migrate   Compare the on-disk config against the embedded default and
+//	          write a `.new` sibling with missing top-level keys appended
+//	          (commented). Never modifies the original file.
+func runConfigCommand(args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: rt-node-agent config migrate")
+		return fmt.Errorf("missing subcommand")
+	}
+	switch args[0] {
+	case "migrate":
+		path := os.Getenv("RT_AGENT_CONFIG")
+		if path == "" {
+			path = config.DefaultConfigPath()
+		}
+		res, err := migrate.Migrate(path, config.DefaultYAML)
+		if err != nil {
+			return err
+		}
+		if res.AlreadyCurrent {
+			fmt.Println("config is up-to-date (v" + itoa(res.NewVersion) + ")")
+			return nil
+		}
+		fmt.Print(res.Banner(path))
+		return nil
+	default:
+		fmt.Fprintln(os.Stderr, "unknown config subcommand:", args[0])
+		fmt.Fprintln(os.Stderr, "available: migrate")
+		return fmt.Errorf("unknown subcommand")
+	}
+}
+
+func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
 func printVersion() error {
 	out := map[string]string{

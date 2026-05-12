@@ -56,6 +56,10 @@ func install() error {
 		return fmt.Errorf("write config.yaml.example: %w", err)
 	}
 
+	// Migrate any existing config to the v0.2.0 schema (writes .new only,
+	// never mutates the operator's config in place).
+	runConfigMigrate(filepath.Join(configDirMac, "config.yaml"))
+
 	// Token bootstrap. macOS daemon runs as root (no UserName in the plist),
 	// so 0600 root-only is the correct perm — no group-read needed.
 	tokenPath := filepath.Join(configDirMac, "token")

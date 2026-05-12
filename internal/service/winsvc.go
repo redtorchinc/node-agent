@@ -32,6 +32,8 @@ func install() error {
 	if err := writeConfigExample(cfgDir); err != nil {
 		return fmt.Errorf("write config.yaml.example: %w", err)
 	}
+	// Migrate any existing config to the v0.2.0 schema (writes .new only).
+	runConfigMigrate(filepath.Join(cfgDir, "config.yaml"))
 	tokenPath := filepath.Join(cfgDir, "token")
 	newToken, err := ensureTokenWin(tokenPath)
 	if err != nil {

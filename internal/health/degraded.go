@@ -10,17 +10,37 @@ import (
 // rank_nodes() (see SPEC.md §degraded_reasons). Add new ones by appending;
 // never remove.
 const (
-	ReasonOllamaDown                = "ollama_down"
-	ReasonSwapOver75pct             = "swap_over_75pct"
-	ReasonVRAMOver95pct             = "vram_over_95pct"
-	ReasonAgentStale                = "agent_stale"
-	ReasonVRAMServiceCreepCritical  = "vram_service_creep_critical"
+	// v0.1.x hard reasons
+	ReasonOllamaDown               = "ollama_down"
+	ReasonSwapOver75pct            = "swap_over_75pct"
+	ReasonVRAMOver95pct            = "vram_over_95pct"
+	ReasonAgentStale               = "agent_stale"
+	ReasonVRAMServiceCreepCritical = "vram_service_creep_critical"
+	// v0.1.x soft reasons
+	ReasonSwapOver50pct        = "swap_over_50pct"
+	ReasonVRAMOver90pct        = "vram_over_90pct"
+	ReasonLoadAvgOver2xCores   = "load_avg_over_2x_cores"
+	ReasonOllamaRunnerStuck    = "ollama_runner_stuck"
+	ReasonVRAMServiceCreepWarn = "vram_service_creep_warn"
 
-	ReasonSwapOver50pct             = "swap_over_50pct"
-	ReasonVRAMOver90pct             = "vram_over_90pct"
-	ReasonLoadAvgOver2xCores        = "load_avg_over_2x_cores"
-	ReasonOllamaRunnerStuck         = "ollama_runner_stuck"
-	ReasonVRAMServiceCreepWarn      = "vram_service_creep_warn"
+	// v0.2.0 hard reasons
+	ReasonDiskOver98pct        = "disk_over_98pct"
+	ReasonGPUECCUncorrected    = "gpu_ecc_uncorrected"
+	ReasonVLLMRequiredDown     = "vllm_required_down"
+	ReasonRDMAPortDown         = "rdma_port_down"
+	ReasonRDMAPeermemMissing   = "rdma_peermem_missing"
+	ReasonRDMACollectorStale   = "rdma_collector_stale"
+	ReasonTrainingInProgress   = "training_in_progress"
+	// v0.2.0 soft reasons
+	ReasonDiskOver90pct        = "disk_over_90pct"
+	ReasonClockSkewHigh        = "clock_skew_high"
+	ReasonCPUThermalThrottling = "cpu_thermal_throttling"
+	ReasonGPUThermalThrottling = "gpu_thermal_throttling"
+	ReasonGPUPowerThrottling   = "gpu_power_throttling"
+	ReasonVLLMDown             = "vllm_down"
+	ReasonRDMAErrorsGrowing    = "rdma_errors_growing"
+	ReasonRDMAPFCStorm         = "rdma_pfc_storm"
+	ReasonRDMALinkDegraded     = "rdma_link_degraded"
 )
 
 // hardReasons is the set whose presence sets Report.Degraded=true. All
@@ -31,6 +51,13 @@ var hardReasons = map[string]struct{}{
 	ReasonVRAMOver95pct:            {},
 	ReasonAgentStale:               {},
 	ReasonVRAMServiceCreepCritical: {},
+	ReasonDiskOver98pct:            {},
+	ReasonGPUECCUncorrected:        {},
+	ReasonVLLMRequiredDown:         {},
+	ReasonRDMAPortDown:             {},
+	ReasonRDMAPeermemMissing:       {},
+	ReasonRDMACollectorStale:       {},
+	ReasonTrainingInProgress:       {},
 }
 
 // Evaluate is the pure function at the heart of degraded-state detection.
@@ -39,6 +66,10 @@ var hardReasons = map[string]struct{}{
 //
 // All thresholds in this function default to the values stated in SPEC.md
 // §degraded_reasons. Config overrides are optional and tracked per-reason.
+//
+// Important rule: never fire a reason from a NIL metric. If a platform
+// genuinely can't report (e.g. CPU temps unavailable without root on macOS),
+// the corresponding reason is silent — silence beats a false "all clear".
 func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	var reasons []string
 
@@ -59,6 +90,29 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if serviceCreep(r, creepCritical) {
 		reasons = append(reasons, ReasonVRAMServiceCreepCritical)
 	}
+	if maxDiskPct(r) > 98 {
+		reasons = append(reasons, ReasonDiskOver98pct)
+	}
+	if hasUncorrectableECC(r) {
+		reasons = append(reasons, ReasonGPUECCUncorrected)
+	}
+	if vllmRequiredDown(r, cfg) {
+		reasons = append(reasons, ReasonVLLMRequiredDown)
+	}
+	if r.RDMA != nil {
+		if rdmaPortDown(r) {
+			reasons = append(reasons, ReasonRDMAPortDown)
+		}
+		if r.RDMA.KernelModules != nil && !r.RDMA.KernelModules["nvidia_peermem"] {
+			reasons = append(reasons, ReasonRDMAPeermemMissing)
+		}
+		if rdmaCollectorStale(r, now) {
+			reasons = append(reasons, ReasonRDMACollectorStale)
+		}
+	}
+	if r.Mode == "training_mode" {
+		reasons = append(reasons, ReasonTrainingInProgress)
+	}
 
 	// --- soft reasons, in SPEC order ---
 
@@ -77,8 +131,29 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if serviceCreep(r, creepWarn) {
 		reasons = append(reasons, ReasonVRAMServiceCreepWarn)
 	}
-
-	_ = cfg // reserved for future threshold overrides; keep signature stable
+	if maxDiskPct(r) > 90 && maxDiskPct(r) <= 98 {
+		reasons = append(reasons, ReasonDiskOver90pct)
+	}
+	if clockSkewHigh(r) {
+		reasons = append(reasons, ReasonClockSkewHigh)
+	}
+	if r.CPU.Throttled != nil && *r.CPU.Throttled {
+		reasons = append(reasons, ReasonCPUThermalThrottling)
+	}
+	if anyGPUThrottle(r, "THERMAL") {
+		reasons = append(reasons, ReasonGPUThermalThrottling)
+	}
+	if anyGPUThrottle(r, "POWER") {
+		reasons = append(reasons, ReasonGPUPowerThrottling)
+	}
+	if vllmSoftDown(r, cfg) {
+		reasons = append(reasons, ReasonVLLMDown)
+	}
+	if r.RDMA != nil {
+		if rdmaLinkDegraded(r) {
+			reasons = append(reasons, ReasonRDMALinkDegraded)
+		}
+	}
 
 	degraded := false
 	for _, r := range reasons {
@@ -102,6 +177,123 @@ func maxVRAMPct(r Report) float64 {
 		}
 	}
 	return m
+}
+
+func maxDiskPct(r Report) float64 {
+	var m float64
+	for _, d := range r.Disk {
+		if d.UsedPct > m {
+			m = d.UsedPct
+		}
+	}
+	return m
+}
+
+func hasUncorrectableECC(r Report) bool {
+	for _, g := range r.GPUs {
+		if g.ECCVolatileUncorrected != nil && *g.ECCVolatileUncorrected > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func anyGPUThrottle(r Report, kind string) bool {
+	for _, g := range r.GPUs {
+		for _, reason := range g.ThrottleReasons {
+			if kind == "THERMAL" && (reason == "HW_THERMAL_SLOWDOWN" || reason == "SW_THERMAL_SLOWDOWN") {
+				return true
+			}
+			if kind == "POWER" && (reason == "HW_POWER_BRAKE_SLOWDOWN" || reason == "SW_POWER_CAP") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func clockSkewHigh(r Report) bool {
+	if r.TimeSync == nil || r.TimeSync.SkewMS == nil {
+		return false
+	}
+	v := *r.TimeSync.SkewMS
+	if v < 0 {
+		v = -v
+	}
+	return v > 100
+}
+
+// vllmRequiredDown fires when config says vllm is required but the platforms
+// probe says it's not up.
+func vllmRequiredDown(r Report, cfg config.Config) bool {
+	if !cfg.Platforms.VLLM.Required {
+		return false
+	}
+	p, ok := r.Platforms["vllm"]
+	return ok && !p.Up
+}
+
+// vllmSoftDown fires when vllm is configured (enabled != "false") but down,
+// and isn't already covered by the hard `vllm_required_down` case.
+func vllmSoftDown(r Report, cfg config.Config) bool {
+	if cfg.Platforms.VLLM.Required {
+		return false // covered by vllm_required_down (hard)
+	}
+	if cfg.Platforms.VLLM.Enabled == "false" {
+		return false
+	}
+	p, ok := r.Platforms["vllm"]
+	if !ok {
+		return false
+	}
+	// Only fire if the agent actually attempted a probe. Empty endpoint
+	// means platforms.vllm wasn't configured.
+	if p.Endpoint == "" {
+		return false
+	}
+	return !p.Up
+}
+
+// rdmaPortDown fires when any RDMA port isn't ACTIVE / LINK_UP. Training
+// dispatch reads this directly to refuse a node mid-training.
+func rdmaPortDown(r Report) bool {
+	for _, d := range r.RDMA.Devices {
+		if d.State != "ACTIVE" {
+			return true
+		}
+		if d.PhysicalState != "" && d.PhysicalState != "LINK_UP" {
+			return true
+		}
+	}
+	return false
+}
+
+// rdmaCollectorStale fires when LastCollectedTS is older than 30s on any
+// device. Indicates the agent's collection loop is unhealthy and the
+// dispatcher should not trust the rest of the rdma block.
+func rdmaCollectorStale(r Report, now time.Time) bool {
+	for _, d := range r.RDMA.Devices {
+		if d.LastCollectedTS == 0 {
+			continue
+		}
+		if now.Unix()-d.LastCollectedTS > 30 {
+			return true
+		}
+	}
+	return false
+}
+
+// rdmaLinkDegraded fires when an active port reports a rate below 200 Gbps.
+// 200 G is the Spark/CX-7 baseline; lower indicates a misconfiguration
+// (wrong cable, auto-negotiation glitch). Skipped for ports that don't
+// expose a rate (some older drivers leave the file blank).
+func rdmaLinkDegraded(r Report) bool {
+	for _, d := range r.RDMA.Devices {
+		if d.State == "ACTIVE" && d.RateGbps > 0 && d.RateGbps < 200 {
+			return true
+		}
+	}
+	return false
 }
 
 type creepLevel int

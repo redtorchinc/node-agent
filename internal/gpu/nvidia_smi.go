@@ -55,6 +55,51 @@ func (n *NvidiaSMI) resolve() {
 	n.resolveErr = errors.New("nvidia-smi not found")
 }
 
+// queryFields is the column list passed to --query-gpu. KEEP IN SYNC with
+// the index constants below; ParseNvidiaSMI indexes by position.
+//
+// We deliberately query a long line in a single shell-out — one round-trip
+// is cheaper than five even with longer parse time.
+const queryFields = "index,uuid,name,driver_version,pci.bus_id," +
+	"compute_cap," +
+	"memory.total,memory.used," +
+	"utilization.gpu,utilization.memory," +
+	"temperature.gpu,temperature.memory," +
+	"power.draw,power.limit," +
+	"clocks.gr,clocks.mem,clocks.sm,clocks.max.gr," +
+	"clocks_throttle_reasons.active," +
+	"ecc.errors.uncorrected.volatile.total,ecc.errors.uncorrected.aggregate.total," +
+	"fan.speed,persistence_mode,compute_mode,mig.mode.current"
+
+// Field indices for the above list. Keep contiguous with queryFields.
+const (
+	fIndex = iota
+	fUUID
+	fName
+	fDriver
+	fPCIBus
+	fComputeCap
+	fMemTotal
+	fMemUsed
+	fUtilGPU
+	fUtilMem
+	fTempGPU
+	fTempMem
+	fPowerDraw
+	fPowerLimit
+	fClockGr
+	fClockMem
+	fClockSM
+	fClockGrMax
+	fThrottle
+	fECCVolatile
+	fECCAggregate
+	fFanSpeed
+	fPersistence
+	fComputeMode
+	fMIGMode
+)
+
 // Probe implements Probe.
 func (n *NvidiaSMI) Probe(ctx context.Context) ([]GPU, error) {
 	n.once.Do(n.resolve)
@@ -64,7 +109,7 @@ func (n *NvidiaSMI) Probe(ctx context.Context) ([]GPU, error) {
 
 	gpuRows, err := n.run(ctx,
 		n.resolved,
-		"--query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,power.limit",
+		"--query-gpu="+queryFields,
 		"--format=csv,noheader,nounits",
 	)
 	if err != nil {
@@ -80,7 +125,25 @@ func (n *NvidiaSMI) Probe(ctx context.Context) ([]GPU, error) {
 		procRows = nil
 	}
 
-	return ParseNvidiaSMI(gpuRows, procRows)
+	gpus, err := ParseNvidiaSMI(gpuRows, procRows)
+	if err != nil {
+		return gpus, err
+	}
+
+	// NVLink is queried separately because the output shape is text, not CSV.
+	if nvOut, err := n.run(ctx, n.resolved, "nvlink", "--status"); err == nil {
+		applyNVLink(gpus, nvOut)
+	}
+
+	// CUDA version: best-effort, single line text output.
+	if out, err := n.run(ctx, n.resolved, "--query-gpu=cuda_version", "--format=csv,noheader,nounits"); err == nil {
+		v := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+		for i := range gpus {
+			gpus[i].CUDAVersion = v
+		}
+	}
+
+	return gpus, nil
 }
 
 func (n *NvidiaSMI) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -105,58 +168,205 @@ func ParseNvidiaSMI(gpuCSV, procCSV []byte) ([]GPU, error) {
 		return nil, fmt.Errorf("parse gpu csv: %w", err)
 	}
 	gpus := make([]GPU, 0, len(gpuRecords))
-	byIndex := map[int]*GPU{}
+	byUUID := map[string]*GPU{}
 	for _, row := range gpuRecords {
-		if len(row) < 8 {
-			continue
+		// Tolerate rows shorter than the full field list — older driver
+		// versions emit fewer columns. Treat missing trailing fields as
+		// blank / zero values rather than rejecting the row.
+		get := func(i int) string {
+			if i >= len(row) {
+				return ""
+			}
+			return strings.TrimSpace(row[i])
 		}
-		idx := atoi(row[0])
-		total := atoi64(row[2])
-		used := atoi64(row[3])
+		idx := atoi(get(fIndex))
+		total := atoi64(get(fMemTotal))
+		used := atoi64(get(fMemUsed))
 		g := GPU{
-			Index:       idx,
-			Name:        strings.TrimSpace(row[1]),
-			VRAMTotalMB: total,
-			VRAMUsedMB:  used,
-			VRAMUsedPct: pct(used, total),
-			UtilPct:     atoi(row[4]),
-			TempC:       atoi(row[5]),
-			PowerW:      int(atof(row[6])),
-			PowerCapW:   int(atof(row[7])),
-			Processes:   []Process{},
+			Index:             idx,
+			UUID:              get(fUUID),
+			Name:              get(fName),
+			DriverVersion:     get(fDriver),
+			PCIBusID:          get(fPCIBus),
+			ComputeCapability: get(fComputeCap),
+			VRAMTotalMB:       total,
+			VRAMUsedMB:        used,
+			VRAMUsedPct:       pct(used, total),
+			UtilPct:           atoi(get(fUtilGPU)),
+			MemoryUtilPct:     atoi(get(fUtilMem)),
+			TempC:             atoi(get(fTempGPU)),
+			TempMemoryC:       atoi(get(fTempMem)),
+			PowerW:            int(atof(get(fPowerDraw))),
+			PowerCapW:         int(atof(get(fPowerLimit))),
+			ClockGraphicsMHz:    atoi(get(fClockGr)),
+			ClockMemoryMHz:      atoi(get(fClockMem)),
+			ClockSMMHz:          atoi(get(fClockSM)),
+			ClockGraphicsMaxMHz: atoi(get(fClockGrMax)),
+			ThrottleReasons:     parseThrottleHex(get(fThrottle)),
+			PersistenceMode:     get(fPersistence),
+			ComputeMode:         get(fComputeMode),
+			MIGMode:             get(fMIGMode),
+			Processes:           []Process{},
+		}
+		if v := get(fECCVolatile); v != "" && v != "[N/A]" && v != "N/A" {
+			n := atoi64(v)
+			g.ECCVolatileUncorrected = &n
+		}
+		if v := get(fECCAggregate); v != "" && v != "[N/A]" && v != "N/A" {
+			n := atoi64(v)
+			g.ECCAggregateUncorrected = &n
+		}
+		if v := get(fFanSpeed); v != "" && v != "[N/A]" && v != "N/A" {
+			n := atoi(v)
+			g.FanPct = &n
 		}
 		gpus = append(gpus, g)
-		byIndex[idx] = &gpus[len(gpus)-1]
+		if g.UUID != "" {
+			byUUID[g.UUID] = &gpus[len(gpus)-1]
+		}
 	}
 
 	if len(procCSV) > 0 {
 		procRecords, err := readCSV(procCSV)
 		if err == nil {
 			// gpu_uuid,pid,process_name,used_memory
-			// We don't have UUID→index mapping here since we queried by index.
-			// In practice nvidia-smi's compute-apps output uses the same ordering
-			// as query-gpu when filtered; but to be safe, attach all to index 0
-			// when we can't resolve. For a more accurate mapping, a future change
-			// can query gpu_bus_id on both sides.
 			for _, row := range procRecords {
 				if len(row) < 4 {
 					continue
 				}
 				p := Process{
-					PID:         atoi(row[1]),
+					PID:         atoi(strings.TrimSpace(row[1])),
 					Name:        strings.TrimSpace(row[2]),
 					CmdlineHead: strings.TrimSpace(row[2]),
-					VRAMUsedMB:  atoi64(row[3]),
+					VRAMUsedMB:  atoi64(strings.TrimSpace(row[3])),
 				}
-				// Attach to first GPU if we only have one; otherwise to index 0.
-				if len(gpus) > 0 {
+				uuid := strings.TrimSpace(row[0])
+				if g, ok := byUUID[uuid]; ok {
+					g.Processes = append(g.Processes, p)
+				} else if len(gpus) > 0 {
 					gpus[0].Processes = append(gpus[0].Processes, p)
-					byIndex[gpus[0].Index] = &gpus[0]
 				}
 			}
 		}
 	}
 	return gpus, nil
+}
+
+// parseThrottleHex turns nvidia-smi's hex bitmask
+// (e.g. "0x0000000000000001") into a stable list of reason strings the
+// degraded evaluator can match on. Unknown bits are surfaced as
+// "unknown_0xNN" so an operator can grep for them.
+//
+// Bit definitions per NVML reference: GPU_IDLE=1, APP_CLOCKS_SETTING=2,
+// SW_POWER_CAP=4, HW_SLOWDOWN=8, SYNC_BOOST=10, SW_THERMAL_SLOWDOWN=20,
+// HW_THERMAL_SLOWDOWN=40, HW_POWER_BRAKE_SLOWDOWN=80, DISPLAY_CLOCK_SETTING=100.
+func parseThrottleHex(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "[N/A]" || s == "N/A" || s == "0x0" || s == "0x00" {
+		return nil
+	}
+	v, err := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 64)
+	if err != nil || v == 0 {
+		return nil
+	}
+	type bit struct {
+		mask uint64
+		name string
+	}
+	bits := []bit{
+		{0x0001, "GPU_IDLE"},
+		{0x0002, "APP_CLOCKS_SETTING"},
+		{0x0004, "SW_POWER_CAP"},
+		{0x0008, "HW_SLOWDOWN"},
+		{0x0010, "SYNC_BOOST"},
+		{0x0020, "SW_THERMAL_SLOWDOWN"},
+		{0x0040, "HW_THERMAL_SLOWDOWN"},
+		{0x0080, "HW_POWER_BRAKE_SLOWDOWN"},
+		{0x0100, "DISPLAY_CLOCK_SETTING"},
+	}
+	var out []string
+	for _, b := range bits {
+		if v&b.mask != 0 {
+			out = append(out, b.name)
+			v &^= b.mask
+		}
+	}
+	if v != 0 {
+		out = append(out, fmt.Sprintf("unknown_0x%x", v))
+	}
+	return out
+}
+
+// applyNVLink folds `nvidia-smi nvlink --status` output into each GPU's
+// NVLink field. The output looks like:
+//
+//	GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-...)
+//	         Link 0: 25 GB/s
+//	         Link 1: <inactive>
+//	GPU 1: ...
+//
+// Some driver versions add a "Rx Throughput KBp" suffix per link; we only
+// extract the link index and headline speed.
+func applyNVLink(gpus []GPU, raw []byte) {
+	var cur *GPU
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimRight(line, "\r")
+		// "GPU N: ..." marks a new section.
+		if strings.HasPrefix(line, "GPU ") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) < 1 {
+				cur = nil
+				continue
+			}
+			idxStr := strings.TrimPrefix(strings.TrimSpace(parts[0]), "GPU ")
+			idx, err := strconv.Atoi(idxStr)
+			if err != nil {
+				cur = nil
+				continue
+			}
+			cur = nil
+			for i := range gpus {
+				if gpus[i].Index == idx {
+					cur = &gpus[i]
+					if cur.NVLink == nil {
+						cur.NVLink = &NVLink{Supported: true, Links: []NVLinkLink{}}
+					}
+					break
+				}
+			}
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "Link ") {
+			continue
+		}
+		// Examples: "Link 0: 25 GB/s" or "Link 3: <inactive>"
+		colon := strings.Index(trimmed, ":")
+		if colon < 0 {
+			continue
+		}
+		linkStr := strings.TrimPrefix(trimmed[:colon], "Link ")
+		linkIdx, err := strconv.Atoi(strings.TrimSpace(linkStr))
+		if err != nil {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[colon+1:])
+		ll := NVLinkLink{Link: linkIdx, State: "Down"}
+		if !strings.Contains(strings.ToLower(rest), "inactive") {
+			ll.State = "Up"
+			// Parse leading "<num> GB/s"
+			parts := strings.Fields(rest)
+			if len(parts) >= 2 {
+				if v, err := strconv.Atoi(parts[0]); err == nil {
+					ll.SpeedGBPerS = v
+				}
+			}
+		}
+		cur.NVLink.Links = append(cur.NVLink.Links, ll)
+	}
 }
 
 func readCSV(b []byte) ([][]string, error) {

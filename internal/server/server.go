@@ -15,7 +15,9 @@ import (
 
 	"github.com/redtorchinc/node-agent/internal/config"
 	"github.com/redtorchinc/node-agent/internal/health"
+	"github.com/redtorchinc/node-agent/internal/mode"
 	"github.com/redtorchinc/node-agent/internal/ollama"
+	"github.com/redtorchinc/node-agent/internal/services"
 )
 
 // Server wraps an http.Server + the shared dependencies its handlers read from.
@@ -23,6 +25,8 @@ type Server struct {
 	cfg      config.Config
 	reporter *health.Reporter
 	ollama   *ollama.Client
+	svcMgr   services.Manager
+	modeMgr  *mode.Manager
 	http     *http.Server
 }
 
@@ -32,6 +36,20 @@ func New(cfg config.Config, reporter *health.Reporter) *Server {
 		cfg:      cfg,
 		reporter: reporter,
 		ollama:   reporter.Ollama,
+		svcMgr:   services.FromConfig(cfg.Services),
+		modeMgr:  mode.New(cfg.TrainingMode.StateFile, int64(cfg.TrainingMode.GracePeriodS)),
+	}
+	// Restore any persisted training-mode state from disk. Safe to call
+	// before serving — if state is stale (expected_duration + grace
+	// exceeded), Restore clears it and logs a warning rather than carrying
+	// it into a fresh run.
+	s.modeMgr.Restore()
+	reporter.SetModeReporter(s.modeMgr)
+
+	// Wire the services snapshot into the health reporter so /health.services
+	// is populated without health having to import internal/services.
+	if s.svcMgr != nil {
+		reporter.SetServicesReporter(services.HealthBridge{M: s.svcMgr})
 	}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -87,7 +105,10 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/version", s.handleVersion)
+	mux.HandleFunc("/capabilities", s.handleCapabilities)
 	mux.HandleFunc("/actions/unload-model", s.requireToken(s.handleUnload))
+	mux.HandleFunc("/actions/service", s.requireToken(s.handleServiceAction))
+	mux.HandleFunc("/actions/training-mode", s.requireToken(s.handleTrainingMode))
 	if s.cfg.MetricsEnabled {
 		mux.HandleFunc("/metrics", s.handleMetrics)
 	}
@@ -100,6 +121,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintln(w, "rt-node-agent — see SPEC.md")
-	fmt.Fprintln(w, "endpoints: GET /health, GET /version, POST /actions/unload-model")
+	fmt.Fprintln(w, "rt-node-agent — see SPEC.md and docs/")
+	fmt.Fprintln(w, "read:    GET /health, GET /version, GET /capabilities, GET /metrics")
+	fmt.Fprintln(w, "actions: POST /actions/unload-model, POST /actions/service")
 }

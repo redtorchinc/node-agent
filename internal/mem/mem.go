@@ -6,28 +6,41 @@ package mem
 import (
 	"context"
 
-	"github.com/shirou/gopsutil/v3/mem"
+	gmem "github.com/shirou/gopsutil/v3/mem"
 )
 
-// Info mirrors the /health JSON shape from SPEC.md §HTTP API.
+// Info mirrors the /health JSON shape from SPEC.md §HTTP API. v0.2.0 adds
+// AvailableMB/BuffersMB/CachedMB/Pressure/HugePages — additive only.
 type Info struct {
 	TotalMB     int64   `json:"total_mb"`
 	UsedMB      int64   `json:"used_mb"`
 	UsedPct     float64 `json:"used_pct"`
+	AvailableMB int64   `json:"available_mb,omitempty"`
+	BuffersMB   int64   `json:"buffers_mb,omitempty"`
+	CachedMB    int64   `json:"cached_mb,omitempty"`
 	SwapTotalMB int64   `json:"swap_total_mb"`
 	SwapUsedMB  int64   `json:"swap_used_mb"`
 	SwapUsedPct float64 `json:"swap_used_pct"`
 	Unified     bool    `json:"unified"`
+
+	// Pressure is platform-specific text: "normal" | "some" | "full" on
+	// Linux PSI-capable kernels, "normal" | "warn" | "critical" on macOS,
+	// "low" | "high" on Windows. Omitted when unavailable.
+	Pressure string `json:"pressure,omitempty"`
+
+	// HugePagesTotal/Free are Linux-only.
+	HugePagesTotal *int64 `json:"huge_pages_total,omitempty"`
+	HugePagesFree  *int64 `json:"huge_pages_free,omitempty"`
 }
 
 // Probe collects RAM and swap stats. Blocks for gopsutil-internal I/O but
 // should return in well under a second on any supported platform.
 func Probe(_ context.Context) (Info, error) {
-	v, err := mem.VirtualMemory()
+	v, err := gmem.VirtualMemory()
 	if err != nil {
 		return Info{}, err
 	}
-	s, err := mem.SwapMemory()
+	s, err := gmem.SwapMemory()
 	if err != nil {
 		return Info{}, err
 	}
@@ -35,10 +48,20 @@ func Probe(_ context.Context) (Info, error) {
 		TotalMB:     int64(v.Total / 1024 / 1024),
 		UsedMB:      int64(v.Used / 1024 / 1024),
 		UsedPct:     round2(v.UsedPercent),
+		AvailableMB: int64(v.Available / 1024 / 1024),
+		BuffersMB:   int64(v.Buffers / 1024 / 1024),
+		CachedMB:    int64(v.Cached / 1024 / 1024),
 		SwapTotalMB: int64(s.Total / 1024 / 1024),
 		SwapUsedMB:  int64(s.Used / 1024 / 1024),
 		SwapUsedPct: round2(s.UsedPercent),
 		Unified:     unified(),
+	}
+	if p := probePressure(); p != "" {
+		i.Pressure = p
+	}
+	if total, free, ok := probeHugePages(); ok {
+		i.HugePagesTotal = &total
+		i.HugePagesFree = &free
 	}
 	return i, nil
 }

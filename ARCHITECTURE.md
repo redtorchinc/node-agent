@@ -80,7 +80,7 @@ the agent has no public Go API.
 |---|---|
 | [internal/config/config.go](internal/config/config.go) | Loader: defaults → file → env. Struct definitions for all v0.2.0 keys (`Platforms`, `Services`, `TrainingMode`, `RDMA`, `Disk`). |
 | [internal/config/defaults.go](internal/config/defaults.go) | `DefaultYAML` constant — the single source of truth for the example config. `SchemaVersion = 2`. |
-| [internal/config/migrate/migrate.go](internal/config/migrate/migrate.go) | Comment-preserving YAML merge (uses `*yaml.Node`). Produces `config.yaml.new` next to an existing v1 config with missing keys appended commented. Never mutates the operator's file. |
+| [internal/config/migrate/migrate.go](internal/config/migrate/migrate.go) | Backup-then-merge-in-place migration (since v0.2.7). Moves existing `config.yaml` to `config.yaml.bak`, writes the schema's defaults to the live path, then grafts every top-level value the operator had set onto the new tree. Idempotent: re-running is a no-op when the schema already matches. Replaced the older `.new` sidecar approach, which compounded duplicate commented blocks across re-installs. |
 | [examples/config.yaml](examples/config.yaml) | Operator-facing example, kept in sync with `DefaultYAML`. |
 
 ### Platforms (inference backends)

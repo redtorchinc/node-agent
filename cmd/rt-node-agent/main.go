@@ -198,7 +198,7 @@ func runConfigCommand(args []string) error {
 			}
 			return err
 		}
-		if res.AlreadyCurrent {
+		if res.AlreadyCurrent() {
 			fmt.Println("config is up-to-date (v" + itoa(res.NewVersion) + ")")
 			return nil
 		}

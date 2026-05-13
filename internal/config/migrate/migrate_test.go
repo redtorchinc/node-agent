@@ -9,11 +9,11 @@ import (
 )
 
 const v1Existing = `# operator notes: this is the prod inference box
-port: 11435
-bind: 0.0.0.0
+port: 19999
+bind: 127.0.0.1
 token_file: /etc/rt-node-agent/token
-ollama_endpoint: http://localhost:11434
-metrics_enabled: false
+ollama_endpoint: http://192.168.0.10:11434
+metrics_enabled: true
 
 service_allocators:
   - name: gliner2-service
@@ -49,7 +49,12 @@ training_mode:
   grace_period_s: 3600
 `
 
-func TestMigrate_v1ToV2_AppendsMissingKeys(t *testing.T) {
+// TestMigrate_v1ToV2_MergesInPlace is the headline test for v0.2.7.
+// Old behaviour: append commented additions to a `.new` sidecar; each
+// re-install added another duplicate block. New behaviour: back up to
+// `.bak`, write fresh defaults to the live path with operator's values
+// grafted in. No `.new` sidecar, no duplicate blocks.
+func TestMigrate_v1ToV2_MergesInPlace(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte(v1Existing), 0o644); err != nil {
@@ -60,81 +65,109 @@ func TestMigrate_v1ToV2_AppendsMissingKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if res.AlreadyCurrent {
-		t.Fatalf("expected migration, got AlreadyCurrent")
-	}
-	if res.NewConfigPath != cfg+".new" {
-		t.Fatalf("unexpected NewConfigPath: %s", res.NewConfigPath)
-	}
-	if res.OldVersion != 0 {
-		t.Fatalf("expected OldVersion=0 (absent), got %d", res.OldVersion)
-	}
-	if res.NewVersion != 2 {
-		t.Fatalf("expected NewVersion=2, got %d", res.NewVersion)
+	if res.Action != ActionMerged {
+		t.Fatalf("Action = %q, want %q", res.Action, ActionMerged)
 	}
 
-	// platforms, services, training_mode should all be appended.
-	wantKeys := []string{"platforms", "services", "training_mode"}
-	for _, k := range wantKeys {
-		found := false
-		for _, got := range res.AddedKeys {
-			if got == k {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected %q in AddedKeys, got %v", k, res.AddedKeys)
-		}
+	// .bak must exist and contain the original verbatim.
+	if res.BackupPath != cfg+".bak" {
+		t.Fatalf("BackupPath = %q, want %q", res.BackupPath, cfg+".bak")
 	}
-
-	out, err := os.ReadFile(res.NewConfigPath)
+	bakBytes, err := os.ReadFile(res.BackupPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(out)
-
-	// Original content preserved verbatim — including the operator comment.
-	if !strings.Contains(s, "# operator notes: this is the prod inference box") {
-		t.Errorf("original operator comment not preserved")
-	}
-	if !strings.Contains(s, "url: http://localhost:8077/v1/debug/gpu") {
-		t.Errorf("original allocator URL not preserved")
+	if string(bakBytes) != v1Existing {
+		t.Errorf(".bak content differs from original; operator can't recover from this")
 	}
 
-	// New additions must be fully commented out — no live YAML keys.
-	// Slice from the start of the section header line, not from the literal
-	// "v0.2.0 additions" text mid-line.
-	hdrIdx := strings.Index(s, "# ")
-	if i := strings.Index(s, "v0.2.0 additions"); i >= 0 {
-		// Back up to the start of the line containing the header.
-		hdrIdx = strings.LastIndex(s[:i], "\n") + 1
-	}
-	addedSection := s[hdrIdx:]
-	for _, line := range strings.Split(addedSection, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if !strings.HasPrefix(trimmed, "#") {
-			t.Errorf("uncommented line in additions section: %q", line)
-		}
+	// .new sidecar must NOT exist any more.
+	if _, err := os.Stat(cfg + ".new"); !os.IsNotExist(err) {
+		t.Errorf(".new sidecar should not be created; got stat err=%v", err)
 	}
 
-	// Banner is non-empty and includes both file paths.
-	banner := res.Banner(cfg)
-	if banner == "" {
-		t.Fatalf("expected non-empty banner")
+	// Live config exists, parses as YAML, has the new schema version
+	// and operator's customised values.
+	liveBytes, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(banner, cfg) || !strings.Contains(banner, res.NewConfigPath) {
-		t.Errorf("banner missing paths: %s", banner)
+	live := string(liveBytes)
+	if !strings.Contains(live, "config_version: 2") {
+		t.Errorf("merged file missing config_version: %s", live)
+	}
+	if !strings.Contains(live, "port: 19999") {
+		t.Errorf("merged file lost operator's port: %s", live)
+	}
+	if !strings.Contains(live, "192.168.0.10") {
+		t.Errorf("merged file lost operator's ollama_endpoint: %s", live)
+	}
+	if !strings.Contains(live, "metrics_enabled: true") {
+		t.Errorf("merged file lost operator's metrics_enabled: %s", live)
+	}
+
+	// New features default to their schema defaults.
+	if !strings.Contains(live, "platforms:") {
+		t.Errorf("merged file missing platforms section")
+	}
+	if !strings.Contains(live, "vllm:") {
+		t.Errorf("merged file missing vllm subsection")
+	}
+
+	// PreservedKeys lists what was grafted.
+	wantPreserved := map[string]bool{
+		"port": true, "bind": true, "token_file": true,
+		"ollama_endpoint": true, "metrics_enabled": true,
+		"service_allocators": true,
+	}
+	for _, k := range res.PreservedKeys {
+		delete(wantPreserved, k)
+	}
+	if len(wantPreserved) > 0 {
+		t.Errorf("expected these keys in PreservedKeys but missing: %v", wantPreserved)
+	}
+}
+
+// TestMigrate_Idempotent_NoDuplicateBlocks is the regression test for
+// the bug that prompted this redesign: running Migrate twice in a row
+// against the same live config must not create duplicate blocks.
+func TestMigrate_Idempotent_NoDuplicateBlocks(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte(v1Existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// First pass migrates.
+	if _, err := Migrate(cfg, v2Default); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	contentAfterFirst, _ := os.ReadFile(cfg)
+
+	// Second pass against the same (now-v2) live file: should be a no-op.
+	res, err := Migrate(cfg, v2Default)
+	if err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	if res.Action != ActionNoChange {
+		t.Errorf("second migrate Action = %q, want %q (idempotency broken)", res.Action, ActionNoChange)
+	}
+
+	contentAfterSecond, _ := os.ReadFile(cfg)
+	if string(contentAfterFirst) != string(contentAfterSecond) {
+		t.Errorf("second migrate changed the live file; expected idempotent no-op\nbefore:\n%s\nafter:\n%s",
+			contentAfterFirst, contentAfterSecond)
+	}
+
+	// "platforms:" should appear exactly once — no duplicate block.
+	count := strings.Count(string(contentAfterSecond), "\nplatforms:")
+	if count > 1 {
+		t.Errorf("found %d occurrences of 'platforms:' in live config — duplicate block bug returned", count)
 	}
 }
 
 func TestMigrate_AlreadyCurrent_NoOp(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
-	// A v2 config with all default top-level keys present.
 	if err := os.WriteFile(cfg, []byte(v2Default), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -142,34 +175,39 @@ func TestMigrate_AlreadyCurrent_NoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if !res.AlreadyCurrent {
-		t.Errorf("expected AlreadyCurrent=true on matching config")
+	if res.Action != ActionNoChange {
+		t.Errorf("Action = %q, want %q", res.Action, ActionNoChange)
 	}
-	if res.NewConfigPath != "" {
-		t.Errorf("expected no .new file, got %s", res.NewConfigPath)
+	if res.BackupPath != "" {
+		t.Errorf("BackupPath = %q, want empty for no-op", res.BackupPath)
 	}
-	if _, err := os.Stat(cfg + ".new"); !os.IsNotExist(err) {
-		t.Errorf(".new file should not exist when no migration needed")
+	// No .bak written.
+	if _, err := os.Stat(cfg + ".bak"); !os.IsNotExist(err) {
+		t.Errorf(".bak should not exist after no-op migration")
 	}
 }
 
-func TestMigrate_MissingExistingFile_ReturnsAlreadyCurrent(t *testing.T) {
+func TestMigrate_MissingExistingFile_ReturnsFresh(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "does-not-exist.yaml")
 	res, err := Migrate(cfg, v2Default)
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if !res.AlreadyCurrent {
-		t.Errorf("expected AlreadyCurrent=true when source file is absent")
+	if res.Action != ActionFresh {
+		t.Errorf("Action = %q, want %q", res.Action, ActionFresh)
+	}
+	if !res.AlreadyCurrent() {
+		t.Errorf("AlreadyCurrent should report true on Fresh action")
+	}
+	if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+		t.Errorf("Migrate must not create config.yaml when none existed (install path writes the example instead)")
 	}
 }
 
 func TestMigrate_BrokenYAML_ReturnsErrBrokenYAML(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
-	// Missing colon on the third key — the kind of operator hand-edit
-	// (or v0.1.x example that drifted) that bricked a real DGX upgrade.
 	if err := os.WriteFile(cfg, []byte("port: 11435\nbind: 0.0.0.0\nbroken value here\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -180,12 +218,76 @@ func TestMigrate_BrokenYAML_ReturnsErrBrokenYAML(t *testing.T) {
 	if !errors.Is(err, ErrBrokenYAML) {
 		t.Errorf("expected errors.Is(err, ErrBrokenYAML)=true, got %v", err)
 	}
+	// The live file must not be touched when parse fails.
+	got, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(got), "broken value here") {
+		t.Errorf("Migrate must not mutate a broken file; it's the caller's job to ForceReset")
+	}
+}
+
+func TestMigrate_DeprecatedKeysAreSurfaced(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	withDeprecated := v1Existing + "\nold_removed_setting: 42\n"
+	if err := os.WriteFile(cfg, []byte(withDeprecated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Migrate(cfg, v2Default)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if res.Action != ActionMerged {
+		t.Fatalf("Action = %q, want %q", res.Action, ActionMerged)
+	}
+	found := false
+	for _, k := range res.DroppedKeys {
+		if k == "old_removed_setting" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("DroppedKeys = %v, expected to contain old_removed_setting", res.DroppedKeys)
+	}
+	// The deprecated key must NOT appear in the live merged file.
+	live, _ := os.ReadFile(cfg)
+	if strings.Contains(string(live), "old_removed_setting") {
+		t.Errorf("merged file still contains deprecated key; should be dropped (recoverable from .bak)")
+	}
+	// It MUST appear in the .bak.
+	bak, _ := os.ReadFile(res.BackupPath)
+	if !strings.Contains(string(bak), "old_removed_setting") {
+		t.Errorf(".bak should preserve the deprecated key for operator recovery")
+	}
+}
+
+func TestMigrate_Banner_OnlyOnMerged(t *testing.T) {
+	r := Result{Action: ActionNoChange}
+	if r.Banner("/etc/cfg") != "" {
+		t.Errorf("Banner should be empty on no-change")
+	}
+	r = Result{Action: ActionFresh}
+	if r.Banner("/etc/cfg") != "" {
+		t.Errorf("Banner should be empty on fresh install")
+	}
+	r = Result{
+		Action:        ActionMerged,
+		BackupPath:    "/etc/cfg.bak",
+		PreservedKeys: []string{"port", "bind"},
+		OldVersion:    1, NewVersion: 2,
+	}
+	b := r.Banner("/etc/cfg")
+	if !strings.Contains(b, "/etc/cfg.bak") {
+		t.Errorf("Banner missing backup path: %s", b)
+	}
+	if !strings.Contains(b, "port, bind") {
+		t.Errorf("Banner missing preserved keys: %s", b)
+	}
 }
 
 func TestForceReset_BacksUpExistingAndWritesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
-	// Broken file — exactly what ForceReset is designed to recover from.
 	original := "port: 11435\nbroken yaml syntax\n"
 	if err := os.WriteFile(cfg, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -200,7 +302,6 @@ func TestForceReset_BacksUpExistingAndWritesDefaults(t *testing.T) {
 	if !strings.HasPrefix(backup, cfg+".broken-") {
 		t.Errorf("backup path = %q, want %s.broken-<ts>", backup, cfg)
 	}
-	// Backup contains the original content verbatim.
 	got, err := os.ReadFile(backup)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +309,6 @@ func TestForceReset_BacksUpExistingAndWritesDefaults(t *testing.T) {
 	if string(got) != original {
 		t.Errorf("backup contents mismatch")
 	}
-	// Current file is the default.
 	got, err = os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -230,29 +330,5 @@ func TestForceReset_NoExistingFile_WritesDefaultsOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(cfg); err != nil {
 		t.Errorf("default file should exist after ForceReset, got %v", err)
-	}
-}
-
-func TestMigrate_PreservesExistingValues(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.yaml")
-	customized := `port: 19999
-bind: 127.0.0.1
-ollama_endpoint: http://192.168.0.10:11434
-`
-	if err := os.WriteFile(cfg, []byte(customized), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	res, err := Migrate(cfg, v2Default)
-	if err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	out, _ := os.ReadFile(res.NewConfigPath)
-	s := string(out)
-	if !strings.Contains(s, "port: 19999") {
-		t.Errorf("custom port lost")
-	}
-	if !strings.Contains(s, "192.168.0.10") {
-		t.Errorf("custom ollama_endpoint lost")
 	}
 }

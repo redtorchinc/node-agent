@@ -27,8 +27,8 @@ The script:
    - Registers + starts the service (systemd / launchd).
 4. Healthchecks `http://127.0.0.1:11435/version`.
 5. Prints the bearer token (only when generated fresh) and the
-   `config.yaml.new` banner if v0.2.0 introduced keys missing from your
-   existing config.
+   `config updated in place` banner if the schema gained new keys
+   relative to your existing config.
 
 ## Windows
 
@@ -46,16 +46,30 @@ The script registers a Windows Service (`rt-node-agent`) and writes
 Re-running the one-liner upgrades the binary in place. The service restarts
 automatically.
 
-If v0.2.0 introduced new config keys (and it did: `platforms`, `services`,
-`training_mode`, `rdma`, `disk`), the installer writes a
-`/etc/rt-node-agent/config.yaml.new` next to your existing config with the
-new keys appended as commented YAML. **Your existing config is never
-modified in this path.** Review and merge by hand:
+If the new binary's schema gained keys relative to your existing
+config (e.g. `platforms`, `services`, `training_mode`, `rdma`, `disk`
+added in v0.2.0), the installer updates `config.yaml` **in place**:
+
+1. Moves the current `config.yaml` to `config.yaml.bak` (single backup,
+   overwritten on each migration).
+2. Writes the new schema's defaults to `config.yaml`.
+3. Grafts every top-level value you had set in the backup back into the
+   live file — so your `port`, `bind`, `ollama_endpoint`, allocator
+   list, etc. are preserved.
+
+To enable new features, edit `config.yaml` directly and restart:
 
 ```sh
-diff /etc/rt-node-agent/config.yaml /etc/rt-node-agent/config.yaml.new
-sudo mv /etc/rt-node-agent/config.yaml.new /etc/rt-node-agent/config.yaml
-sudo systemctl restart rt-node-agent
+sudo nano /etc/rt-node-agent/config.yaml
+sudo systemctl restart rt-node-agent  # Linux
+sudo launchctl kickstart -k system/com.redtorch.rt-node-agent  # macOS
+Restart-Service rt-node-agent  # Windows (elevated PowerShell)
+```
+
+To see what changed across the upgrade:
+
+```sh
+diff /etc/rt-node-agent/config.yaml.bak /etc/rt-node-agent/config.yaml
 ```
 
 You can also re-run the migration explicitly at any time:

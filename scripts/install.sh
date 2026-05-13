@@ -124,12 +124,14 @@ info "done. health: http://127.0.0.1:${port}/health"
 info "the bearer token above is what the case-manager backend uses for POST /actions/*."
 
 # --- config migration banner ---
-# Two paths the installer's internal migrate may have taken:
-#   1. Existing config parses cleanly but is missing v0.2.0 keys →
-#      .new file is dropped alongside; operator reviews and `mv`s.
-#   2. Existing config was malformed YAML → auto-recovery: original
-#      backed up to .broken-<unix-ts>, fresh defaults laid down at the
-#      original path so the service can start. Surface this loudly.
+# Migration writes in place since v0.2.7:
+#   - Operator's customised values are grafted onto the new defaults.
+#   - The previous file is backed up to config.yaml.bak (single file).
+#   - The .broken-<ts> path is reserved for the auto-recovery branch
+#     (malformed YAML → ForceReset).
+# The rt-node-agent install subcommand printed its own banner during
+# `rt-node-agent install`; the lines below are belt-and-suspenders so
+# the operator still sees the path even if scrollback was lost.
 if ls /etc/rt-node-agent/config.yaml.broken-* >/dev/null 2>&1; then
   broken=$(ls -t /etc/rt-node-agent/config.yaml.broken-* | head -1)
   info ""
@@ -138,15 +140,15 @@ if ls /etc/rt-node-agent/config.yaml.broken-* >/dev/null 2>&1; then
   info "    fresh config:  /etc/rt-node-agent/config.yaml"
   info "    review the old, copy over any settings you'd customised, restart"
 fi
-if [ -f /etc/rt-node-agent/config.yaml.new ]; then
+if [ -f /etc/rt-node-agent/config.yaml.bak ]; then
   if [ "$os" = "darwin" ]; then
     restart_cmd="sudo launchctl kickstart -k system/com.redtorch.rt-node-agent"
   else
     restart_cmd="sudo systemctl restart rt-node-agent"
   fi
   info ""
-  info "*** new config keys available — review and merge: ***"
-  info "    diff /etc/rt-node-agent/config.yaml /etc/rt-node-agent/config.yaml.new"
-  info "    sudo mv /etc/rt-node-agent/config.yaml.new /etc/rt-node-agent/config.yaml"
+  info "*** config.yaml updated in place; previous version at config.yaml.bak ***"
+  info "    diff /etc/rt-node-agent/config.yaml.bak /etc/rt-node-agent/config.yaml"
+  info "    edit /etc/rt-node-agent/config.yaml to enable new features"
   info "    $restart_cmd"
 fi

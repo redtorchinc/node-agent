@@ -80,15 +80,22 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/rt-nod
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/rt-node-agent
 ```
 
-## Linux: pre-existing config not getting new keys after upgrade
+## Pre-existing config didn't pick up new keys after upgrade
 
-By design — the installer never overwrites your config. It drops a
-`config.yaml.new` next to it. Review the diff and `mv` when you're ready.
-You can run the migration manually:
+Since v0.2.7 the migration is in place: the installer moves your old
+`config.yaml` to `config.yaml.bak`, writes the new schema's defaults to
+`config.yaml`, and grafts every top-level value you had set onto the new
+file. Edit `config.yaml` directly to enable new features.
 
-```
-sudo rt-node-agent config migrate
-```
+If the migration appears to have done nothing:
+
+- Check `/etc/rt-node-agent/config.yaml.bak` — does it match the old
+  content? If yes, the migration ran but found nothing to add (already
+  current). If absent, the migration short-circuited because the live
+  file already matches the new schema.
+- Force a re-migration: `sudo rt-node-agent config migrate`. This runs
+  the same logic the installer does.
+- See the previous version: `diff /etc/rt-node-agent/config.yaml.bak /etc/rt-node-agent/config.yaml`.
 
 ## RDMA block missing on a DGX
 

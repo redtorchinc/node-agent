@@ -65,15 +65,18 @@ Lives at `/etc/rt-node-agent/config.yaml` (Linux/macOS) or
 under [examples/config.yaml](examples/config.yaml) is the canonical
 reference; every key is also documented in [docs/config.md](docs/config.md).
 
-**Upgrading from v0.1.x:** the installer auto-runs `config migrate` and
-drops `config.yaml.new` next to your existing config with new keys
-appended as commented YAML. The original file is never modified. Review
-and merge by hand:
+**Upgrading from an earlier version:** the installer auto-runs `config
+migrate`, which (when the schema gained keys) moves your existing
+`config.yaml` to `config.yaml.bak`, writes the new schema's defaults to
+`config.yaml`, and grafts every top-level value you had set back onto
+the live file. To enable new features, edit `config.yaml` directly and
+restart. The migration is idempotent — running it twice in a row is a
+no-op the second time.
 
 ```sh
-diff /etc/rt-node-agent/config.yaml /etc/rt-node-agent/config.yaml.new
-sudo mv /etc/rt-node-agent/config.yaml.new /etc/rt-node-agent/config.yaml
-sudo systemctl restart rt-node-agent
+diff /etc/rt-node-agent/config.yaml.bak /etc/rt-node-agent/config.yaml  # see what changed
+sudo nano /etc/rt-node-agent/config.yaml                                 # enable new features
+sudo systemctl restart rt-node-agent                                     # (or launchctl / Restart-Service)
 ```
 
 ## Operating the agent (per OS)
@@ -151,7 +154,7 @@ Notes:
 rt-node-agent run            # foreground (used by the service unit)
 rt-node-agent healthcheck    # /health logic once to stdout; exit 0 healthy, 1 degraded
 rt-node-agent version        # version / git SHA / build time
-rt-node-agent config migrate # surface new keys on upgrade (drops .new sibling)
+rt-node-agent config migrate # back up config.yaml → .bak, merge in new schema, preserve operator values
 rt-node-agent install        # register as native service (Administrator/root)
 rt-node-agent uninstall      # deregister
 ```

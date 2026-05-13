@@ -201,14 +201,23 @@ func (r *Reporter) SetServicesReporter(s ServicesReporter) { r.services = s }
 func (r *Reporter) SetModeReporter(m ModeReporter) { r.mode = m }
 
 // StartBackground launches per-service allocator scrape loops and warms
-// the GPU probe cache so the first /health after start doesn't pay a
-// cold-cache latency spike. Warmup is bounded at 2s — on a hung
-// system_profiler or nvidia-smi we'd rather start serving /health with
-// empty gpus[] than delay the listener.
+// the GPU and database probe caches. Both warmups run in detached
+// goroutines so the HTTP listener can bind immediately — previously the
+// GPU warmup blocked the caller for up to 2s, which raced install.sh's
+// post-install healthcheck and made fresh installs report false "did
+// not respond on port 11435" failures even though the agent was just
+// finishing its startup probe.
+//
+// Cold /health responses pay the un-cached probe cost (typically <1s on
+// Linux NVIDIA, 1-2s on darwin/Apple Silicon) until each probe's first
+// successful warm. The case-manager's 2s client timeout retries are
+// designed for this.
 func (r *Reporter) StartBackground(ctx context.Context) {
-	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	_, _ = r.GPU.Probe(wctx)
-	cancel()
+	go func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = r.GPU.Probe(wctx)
+	}()
 
 	// Pre-warm the databases probe in a detached goroutine. On macOS the
 	// gopsutil/net socket enumeration shells out to lsof and can take 3-5s

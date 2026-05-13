@@ -99,19 +99,27 @@ func install() error {
 		return fmt.Errorf("write plist: %w", err)
 	}
 
+	// `enable` BEFORE bootstrap. macOS keeps a persistent disabled-services
+	// list (see `launchctl print-disabled system`); a label that ever
+	// failed to load can stay disabled across reboots, which makes a
+	// subsequent bootstrap fail with EIO even though bootout said
+	// "No such process". Calling enable first clears that flag so the
+	// bootstrap below operates on a clean slate.
+	_ = runLaunchctlQuiet("enable", "system/"+launchdLabel)
+
 	// Bootstrap loads + starts in one step on modern macOS. If it still
-	// fails after the defensive bootout, surface a manual-recovery hint
-	// pointing at the canonical sequence so the operator isn't guessing.
+	// fails after the defensive bootout + enable, surface a manual-recovery
+	// hint pointing at the canonical sequence so the operator isn't guessing.
 	if err := runLaunchctl("bootstrap", "system", launchdPlist); err != nil {
 		return fmt.Errorf(`launchctl bootstrap: %w
 
 A previous load is likely wedged. Recover by hand:
   sudo launchctl bootout system/%s 2>/dev/null
+  sudo launchctl enable system/%s
   sudo rm -f %s
   sudo pkill -f %s
-  sudo rt-node-agent install`, err, launchdLabel, launchdPlist, exe)
+  sudo rt-node-agent install`, err, launchdLabel, launchdLabel, launchdPlist, exe)
 	}
-	_ = runLaunchctl("enable", "system/"+launchdLabel)
 	fmt.Println("rt-node-agent installed and started (launchd)")
 	if newToken != "" {
 		fmt.Println()
@@ -214,45 +222,53 @@ func runLaunchctlQuiet(args ...string) error {
 	return exec.Command("launchctl", args...).Run()
 }
 
-// bootoutExisting tears down a prior install. Two passes: the modern
-// label form, then the legacy plist-path form, because a service
-// bootstrapped on an older macOS may not be addressable by label.
-// Stderr is captured and only surfaced if it doesn't match the
-// "service not found" case (exit 113), which is expected on a fresh
-// install. After bootout, wait up to 2s for the daemon process to
-// exit — racing the teardown causes bootstrap to fail with EIO.
+// bootoutExisting tears down a prior install. On a fresh box this is a
+// no-op — the silent path is the common case, not the exceptional one.
+//
+// Sequence:
+//  1. Run `launchctl bootout system/<label>` (modern form). If it returns
+//     "No such process" (exit 3) or "Could not find specified service"
+//     (exit 113), the label is not loaded — silently return. Nothing to
+//     remove, no reason to also try the path form (which would EIO if
+//     the plist file is absent or refers to a service in another
+//     domain) and no reason to log scary errors.
+//  2. If label-form returned any OTHER error, log it but continue;
+//     bootstrap may still succeed.
+//  3. If label-form succeeded, poll `launchctl print system/<label>` for
+//     up to 2s waiting for the kernel to fully release the slot.
+//
+// The path-form bootout (`launchctl bootout system <plist>`) is
+// intentionally NOT a fallback any more — it produces spurious EIO on
+// fresh boxes where the plist file doesn't exist yet, and the
+// label-form covers the modern case.
 func bootoutExisting(label, plistPath string) {
-	for _, args := range [][]string{
-		{"bootout", "system/" + label},
-		{"bootout", "system", plistPath},
-	} {
-		cmd := exec.Command("launchctl", args...)
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err == nil {
-			break
+	cmd := exec.Command("launchctl", "bootout", "system/"+label)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		// Successfully booted out — wait for the kernel to release the slot.
+		for i := 0; i < 8; i++ {
+			if !labelLoaded(label) {
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
-		// Exit code 113 (or its string form) = "Could not find specified
-		// service" — fine, just nothing to remove.
-		msg := stderr.String()
-		if strings.Contains(msg, "Could not find") || strings.Contains(msg, "113") {
-			continue
-		}
-		// Anything else is worth showing the operator (won't abort
-		// install — the subsequent bootstrap might still succeed).
-		fmt.Fprintf(os.Stderr, "launchctl %s: %v: %s\n", strings.Join(args, " "), err, strings.TrimSpace(msg))
+		return
 	}
-	// Best-effort settle. macOS sometimes returns from bootout before
-	// the process has fully exited; an immediate bootstrap then races
-	// the teardown. 250ms × 8 = 2s max is small relative to install
-	// time and saves a wedged daemon.
-	for i := 0; i < 8; i++ {
-		if !labelLoaded(label) {
-			return
-		}
-		time.Sleep(250 * time.Millisecond)
+	msg := stderr.String()
+	// Expected "nothing to remove" outcomes on a fresh box. Silent.
+	if strings.Contains(msg, "No such process") ||
+		strings.Contains(msg, "Could not find") ||
+		strings.Contains(msg, ": 3:") ||
+		strings.Contains(msg, ": 113:") {
+		return
 	}
+	// Some other failure — log and let bootstrap try anyway. Don't make
+	// this fatal; the subsequent bootstrap error message will surface
+	// the actual recovery sequence if it also fails.
+	fmt.Fprintf(os.Stderr, "launchctl bootout system/%s: %v: %s\n",
+		label, err, strings.TrimSpace(msg))
 }
 
 // labelLoaded reports whether `launchctl print system/<label>` succeeds

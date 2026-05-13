@@ -84,6 +84,14 @@ chmod +x "$tmp/$asset"
 install -m 0755 "$tmp/$asset" "$INSTALL_DIR/$BINARY"
 info "installed $INSTALL_DIR/$BINARY"
 
+# macOS attaches com.apple.quarantine to curl-downloaded binaries. /usr/bin/install
+# doesn't propagate xattrs across the copy, but strip defensively on the
+# destination too — costs nothing on Linux (xattr absent → silent) and prevents
+# Gatekeeper from interfering with launchd on macOS Sequoia.
+if [ "$os" = "darwin" ] && command -v xattr >/dev/null 2>&1; then
+  xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY" 2>/dev/null || true
+fi
+
 # --- register system service ---
 # `rt-node-agent install` dispatches to internal/service/{systemd.go,launchd.go}
 # based on the build-tag — systemd on Linux, launchd on macOS.
@@ -91,12 +99,25 @@ info "registering system service"
 "$INSTALL_DIR/$BINARY" install
 
 # --- healthcheck ---
-sleep 1
+# Poll up to 15s. On macOS the agent's StartBackground performs a GPU /
+# system_profiler probe + a database pre-warm before binding the port,
+# which can take several seconds on a slow box or one with a hung
+# nvidia-smi. A single 1s sleep races that startup and emits false
+# negatives — be patient.
 port=${RT_AGENT_PORT:-11435}
-if curl -fsS "http://127.0.0.1:${port}/version" >/dev/null 2>&1; then
-  info "rt-node-agent is running on port ${port}"
-else
-  err "rt-node-agent did not respond on port ${port}; check service logs"
+attempts=30
+sleep_per_attempt=0.5
+i=0
+while [ "$i" -lt "$attempts" ]; do
+  if curl -fsS "http://127.0.0.1:${port}/version" >/dev/null 2>&1; then
+    info "rt-node-agent is running on port ${port}"
+    break
+  fi
+  i=$((i + 1))
+  sleep "$sleep_per_attempt"
+done
+if [ "$i" -ge "$attempts" ]; then
+  err "rt-node-agent did not respond on port ${port} after 15s; check service logs"
 fi
 
 info "done. health: http://127.0.0.1:${port}/health"
@@ -118,9 +139,14 @@ if ls /etc/rt-node-agent/config.yaml.broken-* >/dev/null 2>&1; then
   info "    review the old, copy over any settings you'd customised, restart"
 fi
 if [ -f /etc/rt-node-agent/config.yaml.new ]; then
+  if [ "$os" = "darwin" ]; then
+    restart_cmd="sudo launchctl kickstart -k system/com.redtorch.rt-node-agent"
+  else
+    restart_cmd="sudo systemctl restart rt-node-agent"
+  fi
   info ""
   info "*** new config keys available — review and merge: ***"
   info "    diff /etc/rt-node-agent/config.yaml /etc/rt-node-agent/config.yaml.new"
   info "    sudo mv /etc/rt-node-agent/config.yaml.new /etc/rt-node-agent/config.yaml"
-  info "    sudo systemctl restart rt-node-agent"
+  info "    $restart_cmd"
 fi

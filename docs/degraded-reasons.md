@@ -39,7 +39,7 @@ node). **soft** reasons stay in `reasons[]` but `degraded` may be false
 | `gpu_ecc_uncorrected` | Any GPU reports `ecc_volatile_uncorrected > 0`. |
 | `vllm_required_down` | `platforms.vllm.required: true` AND probe fails. |
 | `rdma_port_down` | Any `rdma.devices[].state != "ACTIVE"` or `physical_state != "LINK_UP"`. |
-| `rdma_peermem_missing` | `rdma.kernel_modules.nvidia_peermem` is false. |
+| `rdma_peermem_missing` | `rdma.kernel_modules.nvidia_peermem` is false **AND** `rdma.gpu_direct_supported` isn't explicitly false. Suppressed on GB10 / DGX Spark and other unified-memory NVIDIA platforms (`vram_unified: true`) where GPUDirect RDMA is architecturally unsupported — NVIDIA's guidance is to fall back to `cudaHostAlloc` + `ib_reg_mr`, not to install `nvidia_peermem`. |
 | `rdma_collector_stale` | Any device's `last_collected_ts` is > 30s old. |
 | `training_in_progress` | `mode == "training_mode"`. Inference dispatch should skip; training dispatch checks for *this exact reason* to confirm a node it asked to enter did. |
 

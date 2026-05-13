@@ -153,10 +153,22 @@ If you still see `vram_total_mb: 0` on GB10:
 
 ## RDMA shows `rdma_peermem_missing`
 
-`nvidia_peermem` isn't loaded. For GPUDirect RDMA over RoCE you need:
+`nvidia_peermem` isn't loaded. For GPUDirect RDMA over RoCE on a
+discrete-NVIDIA host you need:
 
 ```
 sudo modprobe nvidia_peermem
 ```
 
 Persist it across reboots in `/etc/modules-load.d/nvidia_peermem.conf`.
+
+**GB10 / DGX Spark:** this reason is automatically suppressed since
+v0.2.10. The unified-memory iGPU does not support GPUDirect RDMA
+(NVIDIA's official guidance — pinned memory cannot be coherently
+accessed by I/O peripherals). Applications fall back to
+`cudaHostAlloc` + `ib_reg_mr` and introspect
+`CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED` before assuming
+GPUDirect. If you still see this reason on a GB10 box, verify
+`gpus[0].vram_unified: true` and `rdma.gpu_direct_supported: false`
+in `/health`; both should be set by the composer on detection of the
+unified-memory architecture.

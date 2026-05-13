@@ -121,7 +121,7 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 		if rdmaPortDown(r) {
 			reasons = append(reasons, ReasonRDMAPortDown)
 		}
-		if r.RDMA.KernelModules != nil && !r.RDMA.KernelModules["nvidia_peermem"] {
+		if rdmaPeermemMissing(r) {
 			reasons = append(reasons, ReasonRDMAPeermemMissing)
 		}
 		if rdmaCollectorStale(r, now) {
@@ -279,6 +279,30 @@ func vllmSoftDown(r Report, cfg config.Config) bool {
 		return false
 	}
 	return !p.Up
+}
+
+// rdmaPeermemMissing fires when nvidia_peermem isn't loaded AND the host
+// is architecturally capable of GPUDirect RDMA. On GB10 / DGX Spark and
+// similar unified-memory NVIDIA platforms, GPUDirect RDMA is not
+// supported (pinned device memory cannot be coherently accessed by I/O
+// peripherals), so the absence of nvidia_peermem is intentional, not a
+// configuration error — and dispatch must not skip the node for it.
+//
+// applyGPUDirectCapability in report.go sets RDMA.GPUDirectSupported to
+// false on unified-memory hosts; we honor that here.
+func rdmaPeermemMissing(r Report) bool {
+	if r.RDMA == nil {
+		return false
+	}
+	// Architectural carve-out: GB10 / DGX Spark and other unified-memory
+	// NVIDIA GPUs can't support GPUDirect RDMA at all. Don't penalise.
+	if r.RDMA.GPUDirectSupported != nil && !*r.RDMA.GPUDirectSupported {
+		return false
+	}
+	if r.RDMA.KernelModules == nil {
+		return false
+	}
+	return !r.RDMA.KernelModules["nvidia_peermem"]
 }
 
 // rdmaPortDown fires when any RDMA port isn't ACTIVE / LINK_UP. Training

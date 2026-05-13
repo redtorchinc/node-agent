@@ -5,6 +5,7 @@ import (
 
 	"github.com/redtorchinc/node-agent/internal/gpu"
 	"github.com/redtorchinc/node-agent/internal/mem"
+	"github.com/redtorchinc/node-agent/internal/rdma"
 )
 
 // TestApplyUnifiedMemoryDerivation_GB10WithProcesses simulates the GB10 field
@@ -101,4 +102,57 @@ func TestApplyUnifiedMemoryDerivation_TriggersVRAMOver95(t *testing.T) {
 	if maxVRAMPct(rep) <= 95 {
 		t.Errorf("expected maxVRAMPct > 95 on saturated unified-memory box; got %.2f", maxVRAMPct(rep))
 	}
+}
+
+// applyGPUDirectCapability: unified-memory GPU → GPUDirectSupported=false
+// (the GB10 / DGX Spark architectural carve-out).
+func TestApplyGPUDirectCapability_UnifiedSetsFalse(t *testing.T) {
+	rep := Report{
+		GPUs: []gpu.GPU{{Name: "NVIDIA GB10", VRAMUnified: true}},
+		RDMA: &rdma.Info{Enabled: true, KernelModules: map[string]bool{"mlx5_ib": true}},
+	}
+	applyGPUDirectCapability(&rep)
+	if rep.RDMA.GPUDirectSupported == nil {
+		t.Fatalf("expected non-nil GPUDirectSupported on unified GPU")
+	}
+	if *rep.RDMA.GPUDirectSupported {
+		t.Errorf("unified-memory GPU must report GPUDirectSupported=false")
+	}
+}
+
+// Discrete NVIDIA → GPUDirectSupported=true.
+func TestApplyGPUDirectCapability_DiscreteSetsTrue(t *testing.T) {
+	rep := Report{
+		GPUs: []gpu.GPU{{Name: "NVIDIA H100 80GB HBM3"}},
+		RDMA: &rdma.Info{Enabled: true, KernelModules: map[string]bool{"mlx5_ib": true}},
+	}
+	applyGPUDirectCapability(&rep)
+	if rep.RDMA.GPUDirectSupported == nil || !*rep.RDMA.GPUDirectSupported {
+		t.Errorf("discrete NVIDIA → GPUDirectSupported=true; got %v", rep.RDMA.GPUDirectSupported)
+	}
+}
+
+// No NVIDIA GPU (Apple Silicon, AMD): leave nil — consumers treat as
+// "GPUDirect status unknown" rather than assuming either way.
+func TestApplyGPUDirectCapability_NoNvidiaLeavesNil(t *testing.T) {
+	rep := Report{
+		GPUs: []gpu.GPU{{Name: "Apple M4 Max", VRAMUnified: true}},
+		RDMA: &rdma.Info{Enabled: true},
+	}
+	applyGPUDirectCapability(&rep)
+	// Apple Silicon is unified-memory → still sets false (the
+	// "GPUDirect not supported" semantic holds for any unified-memory
+	// platform; we'd never expect nvidia_peermem there).
+	if rep.RDMA.GPUDirectSupported == nil || *rep.RDMA.GPUDirectSupported {
+		t.Errorf("unified Apple Silicon → GPUDirectSupported=false (no nvidia_peermem expected); got %v", rep.RDMA.GPUDirectSupported)
+	}
+}
+
+// RDMA absent: applyGPUDirectCapability is a no-op (no panic).
+func TestApplyGPUDirectCapability_NoRDMABlock(t *testing.T) {
+	rep := Report{
+		GPUs: []gpu.GPU{{Name: "NVIDIA GB10", VRAMUnified: true}},
+		RDMA: nil,
+	}
+	applyGPUDirectCapability(&rep) // must not panic
 }

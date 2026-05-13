@@ -14,6 +14,20 @@ type Info struct {
 	Enabled       bool                     `json:"enabled"`
 	KernelModules map[string]bool          `json:"kernel_modules"`
 	Devices       []Device                 `json:"devices"`
+
+	// GPUDirectSupported reports whether the host's GPU architecture can
+	// support GPUDirect RDMA (the nvidia_peermem / nv-p2p path).
+	//
+	//   true   discrete NVIDIA GPU: nvidia_peermem is expected
+	//   false  unified-memory NVIDIA (GB10 / DGX Spark): GPUDirect RDMA is
+	//          architecturally unsupported by the unified-memory iGPU; pinned
+	//          memory cannot be coherently accessed by I/O peripherals. RDMA
+	//          applications fall back to cudaHostAlloc + ib_reg_mr.
+	//   nil    unknown (no NVIDIA GPU detected, or non-Linux)
+	//
+	// Filled by the health composer (internal/health) after both gpu and
+	// rdma probes complete; the rdma package itself doesn't know about GPUs.
+	GPUDirectSupported *bool `json:"gpu_direct_supported,omitempty"`
 }
 
 // Device is one RDMA port. Linux's /sys/class/infiniband/<dev>/ports/<port>/

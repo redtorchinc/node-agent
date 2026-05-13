@@ -11,6 +11,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/mem"
 	"github.com/redtorchinc/node-agent/internal/ollama"
 	"github.com/redtorchinc/node-agent/internal/platforms"
+	"github.com/redtorchinc/node-agent/internal/rdma"
 )
 
 // cleanReport returns a Report with nothing wrong: ollama up, low memory,
@@ -47,6 +48,66 @@ func TestEvaluate_OllamaDown(t *testing.T) {
 	deg, reasons := Evaluate(r, config.Config{}, now)
 	if !deg || !contains(reasons, ReasonOllamaDown) {
 		t.Errorf("want ollama_down hard, got %v %v", deg, reasons)
+	}
+}
+
+// Issue: GB10 / DGX Spark systems have a unified-memory iGPU that
+// architecturally cannot support GPUDirect RDMA — pinned device memory
+// is not coherently accessible by the CPU or I/O peripherals. NVIDIA's
+// guidance is to fall back to cudaHostAlloc + ib_reg_mr; the agent must
+// not flag the (correct) absence of nvidia_peermem as degraded.
+func TestEvaluate_RDMAPeermemMissing_SuppressedOnGB10(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	f := false
+	r.RDMA = &rdma.Info{
+		Enabled:            true,
+		KernelModules:      map[string]bool{"mlx5_ib": true, "nvidia_peermem": false},
+		GPUDirectSupported: &f,
+	}
+	deg, reasons := Evaluate(r, config.Config{}, now)
+	if contains(reasons, ReasonRDMAPeermemMissing) {
+		t.Errorf("rdma_peermem_missing must not fire on unified-memory hosts (GB10): %v", reasons)
+	}
+	if deg {
+		t.Errorf("GB10 with healthy RDMA fabric (just no peermem) must not be hard-degraded: %v", reasons)
+	}
+}
+
+// On a discrete-NVIDIA host where the module IS missing, the reason
+// still fires — the GB10 carve-out is targeted, not a blanket disable.
+func TestEvaluate_RDMAPeermemMissing_FiresOnDiscreteNvidia(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	tr := true
+	r.RDMA = &rdma.Info{
+		Enabled:            true,
+		KernelModules:      map[string]bool{"mlx5_ib": true, "nvidia_peermem": false},
+		GPUDirectSupported: &tr,
+	}
+	deg, reasons := Evaluate(r, config.Config{}, now)
+	if !contains(reasons, ReasonRDMAPeermemMissing) {
+		t.Errorf("rdma_peermem_missing must fire on discrete-NVIDIA host with module absent: %v", reasons)
+	}
+	if !deg {
+		t.Errorf("hard reason fired but degraded=false")
+	}
+}
+
+// When GPUDirectSupported is nil (unknown — non-NVIDIA host or
+// unrecognised architecture) we preserve the original v0.2.x behaviour:
+// fire on missing module, defer to operator to investigate.
+func TestEvaluate_RDMAPeermemMissing_UnknownArchFires(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	r.RDMA = &rdma.Info{
+		Enabled:       true,
+		KernelModules: map[string]bool{"mlx5_ib": true, "nvidia_peermem": false},
+		// GPUDirectSupported: nil
+	}
+	_, reasons := Evaluate(r, config.Config{}, now)
+	if !contains(reasons, ReasonRDMAPeermemMissing) {
+		t.Errorf("unknown arch + module absent should still fire (back-compat): %v", reasons)
 	}
 }
 

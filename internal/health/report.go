@@ -358,6 +358,7 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	}
 
 	rep.RDMA = rdma.Probe(ctx)
+	applyGPUDirectCapability(&rep)
 
 	rep.Mode = deriveMode(rep, r.mode)
 	if r.mode != nil {
@@ -538,6 +539,52 @@ func applyUnifiedMemoryDerivation(rep *Report) {
 	}
 	if hasUnified {
 		rep.Memory.Unified = true
+	}
+}
+
+// applyGPUDirectCapability sets rep.RDMA.GPUDirectSupported based on
+// detected GPU architecture, and informs degraded.go that
+// rdma_peermem_missing should not fire on hosts where the GPU
+// architecturally can't support GPUDirect RDMA.
+//
+// NVIDIA's official guidance for GB10 (DGX Spark): the unified-memory
+// iGPU returns pinned device memory that cannot be coherently accessed
+// by the CPU or I/O peripherals, so GPUDirect RDMA (nvidia_peermem,
+// nv-p2p, dma-buf, GDRCopy) is not supported. Applications should
+// introspect CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED and fall
+// back to cudaHostAlloc + ib_reg_mr.
+//
+// On hosts with at least one unified-memory GPU, set
+// GPUDirectSupported=false so consumers know the absence of
+// nvidia_peermem is intentional, not a configuration error.
+func applyGPUDirectCapability(rep *Report) {
+	if rep.RDMA == nil {
+		return
+	}
+	hasUnified := false
+	hasDiscreteNvidia := false
+	for _, g := range rep.GPUs {
+		if g.VRAMUnified {
+			hasUnified = true
+			continue
+		}
+		// Discrete NVIDIA path: name surfaced by nvidia-smi typically begins
+		// with "NVIDIA " (or contains it). Anything else (Apple Silicon
+		// without a discrete card, AMD, intel iGPU) doesn't expect peermem.
+		if strings.Contains(g.Name, "NVIDIA") {
+			hasDiscreteNvidia = true
+		}
+	}
+	switch {
+	case hasUnified:
+		f := false
+		rep.RDMA.GPUDirectSupported = &f
+	case hasDiscreteNvidia:
+		t := true
+		rep.RDMA.GPUDirectSupported = &t
+	default:
+		// Unknown — leave nil. Consumers should treat as "GPUDirect status
+		// unknown for this host" rather than assuming either way.
 	}
 }
 

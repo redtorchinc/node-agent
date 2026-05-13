@@ -155,6 +155,7 @@ fields they already know about.
 
   "rdma": {
     "enabled": true,
+    "gpu_direct_supported": true,
     "kernel_modules": {"mlx5_ib": true, "nvidia_peermem": true, ...},
     "devices": [
       {"name": "rocep1s0f0", "port": 1, "state": "ACTIVE", "physical_state": "LINK_UP",

@@ -129,6 +129,41 @@ func TestParseNvidiaSMI_NA(t *testing.T) {
 	}
 }
 
+// TestParseNvidiaSMI_GB10Unified guards the GB10 / Grace-Blackwell case where
+// memory.total is reported as [N/A] because the GPU has no discrete VRAM
+// pool. The parser must flag the GPU as unified so the health composer can
+// back-fill VRAMTotalMB from system memory; without that flag,
+// vram_used_pct stays at 0 and load-aware dispatch is impossible.
+func TestParseNvidiaSMI_GB10Unified(t *testing.T) {
+	// memory.total = [N/A], memory.used = [N/A] — the GB10 shape.
+	row := "0, GPU-gb10-abcd, NVIDIA GB10, 565.0, 00000000:01:00.0, 10.0, [N/A], [N/A], 45, 12, 38, 40, 75.0, 250.0, 1500, 1500, 1500, 1500, 0x0, 0, 0, [N/A], Enabled, Default, Disabled\n"
+	gpus, err := ParseNvidiaSMI([]byte(row), nil)
+	if err != nil {
+		t.Fatalf("ParseNvidiaSMI: %v", err)
+	}
+	if len(gpus) != 1 {
+		t.Fatalf("want 1 gpu, got %d", len(gpus))
+	}
+	if !gpus[0].VRAMUnified {
+		t.Errorf("GB10 GPU must have VRAMUnified=true when memory.total is [N/A]")
+	}
+	// Parser leaves VRAMTotalMB=0 — the health composer fills it from memory.
+	if gpus[0].VRAMTotalMB != 0 {
+		t.Errorf("VRAMTotalMB should stay 0 for the composer to fill; got %d", gpus[0].VRAMTotalMB)
+	}
+}
+
+// A normal discrete-GPU row (memory.total present) must NOT be flagged unified.
+func TestParseNvidiaSMI_DiscreteNotUnified(t *testing.T) {
+	gpus, err := ParseNvidiaSMI([]byte(fullRow0), nil)
+	if err != nil {
+		t.Fatalf("ParseNvidiaSMI: %v", err)
+	}
+	if gpus[0].VRAMUnified {
+		t.Errorf("discrete GPU must not be flagged VRAMUnified=true")
+	}
+}
+
 // TestParseThrottleHex confirms the bitmask decomposition matches NVML.
 func TestParseThrottleHex(t *testing.T) {
 	got := parseThrottleHex("0x60") // SW_THERMAL (0x20) + HW_THERMAL (0x40)

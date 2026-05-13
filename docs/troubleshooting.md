@@ -101,6 +101,49 @@ ls /sys/class/infiniband
 If empty, the kernel modules aren't loaded (typically `mlx5_ib`). The
 agent doesn't `modprobe` — that's a host-config task.
 
+## vLLM-only node is hard-degraded with `ollama_down`
+
+The default config probes both Ollama and vLLM. On a node that intentionally
+runs only vLLM (e.g. GB10 / DGX Spark), the Ollama probe fails truthfully —
+but the agent fires the hard `ollama_down` reason and the case-manager
+ranker hard-skips the box.
+
+Fix: tell the agent the node is vLLM-only in `/etc/rt-node-agent/config.yaml`:
+
+```yaml
+platforms:
+  ollama:
+    enabled: false
+  vllm:
+    enabled: auto
+    endpoint: http://localhost:8000
+```
+
+After `sudo systemctl restart rt-node-agent`, `platforms.ollama.up: false`
+keeps being reported truthfully, but `ollama_down` / `agent_stale` /
+`ollama_runner_stuck` are suppressed in `degraded_reasons` so the ranker
+can dispatch to the node again.
+
+Distinct from `training_mode.disable_ollama_probe: true`, which stops
+probing entirely for the duration of a training drain.
+
+## GB10 / DGX Spark reports `vram_total_mb: 0`
+
+GB10 is a unified-memory NVIDIA part — `nvidia-smi` reports `memory.total`
+as `[N/A]` because there is no discrete VRAM pool. The agent detects this
+at parse time, flags `gpus[0].vram_unified: true`, and back-fills
+`vram_total_mb` from `memory.total_mb` plus `vram_used_mb` from
+`nvidia-smi --query-compute-apps`. After v0.2.2 this is automatic — no
+config required.
+
+If you still see `vram_total_mb: 0` on GB10:
+
+- Confirm `agent_version` >= `0.2.2` (`curl -s http://localhost:11435/version`).
+- Confirm `nvidia-smi` is on the agent's PATH and reports the GB10 GPU.
+- If `nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits`
+  returns a non-`[N/A]` value, the detection heuristic doesn't apply on
+  this driver/firmware combination — file an issue with the raw output.
+
 ## RDMA shows `rdma_peermem_missing`
 
 `nvidia_peermem` isn't loaded. For GPUDirect RDMA over RoCE you need:

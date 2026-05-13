@@ -56,11 +56,13 @@ func (d *Detector) Name() string { return "vllm" }
 // Probe assembles a platforms.Report. Returns Up=false on any unreachable
 // endpoint. When `enabled: false` short-circuits without a network call.
 func (d *Detector) Probe(ctx context.Context) platforms.Report {
+	intervalS := int64(d.cacheTTL / time.Second)
 	if d.cfg.Enabled == "false" {
 		return platforms.Report{
-			Up:       false,
-			Endpoint: d.cfg.Endpoint,
-			Models:   []platforms.Model{},
+			Up:             false,
+			Endpoint:       d.cfg.Endpoint,
+			Models:         []platforms.Model{},
+			ProbeIntervalS: intervalS,
 		}
 	}
 	d.mu.Lock()
@@ -72,10 +74,11 @@ func (d *Detector) Probe(ctx context.Context) platforms.Report {
 	d.mu.Unlock()
 
 	rep := platforms.Report{
-		Endpoint:     d.cfg.Endpoint,
-		Models:       []platforms.Model{},
-		Runners:      []platforms.Runner{},
-		LastScrapeTS: d.now().Unix(),
+		Endpoint:       d.cfg.Endpoint,
+		Models:         []platforms.Model{},
+		Runners:        []platforms.Runner{},
+		LastScrapeTS:   d.now().Unix(),
+		ProbeIntervalS: intervalS,
 	}
 
 	models, version, err := d.fetchModels(ctx)

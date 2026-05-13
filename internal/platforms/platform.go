@@ -40,6 +40,17 @@ type Report struct {
 	// LastScrapeTS is when the metrics/state were last refreshed.
 	LastScrapeTS int64 `json:"last_scrape_ts,omitempty"`
 
+	// ProbeIntervalS is the detector's internal cache TTL in seconds — the
+	// expected refresh cadence for this entry. Self-describing so the
+	// backend's staleness check doesn't have to hardcode a threshold.
+	ProbeIntervalS int64 `json:"probe_interval_s,omitempty"`
+
+	// Stale is true when LastScrapeTS is older than 3 × ProbeIntervalS.
+	// Agent-side flag — the backend can use it without re-implementing the
+	// math. Informational; doesn't fire a degraded_reason on its own (the
+	// existing top-level agent_stale handles the Ollama-specific case).
+	Stale bool `json:"stale,omitempty"`
+
 	// LastError surfaces the most recent probe error string, if any. Empty on
 	// success. Trimmed to avoid leaking internal hostnames in nested error
 	// chains.

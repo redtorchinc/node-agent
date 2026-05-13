@@ -11,6 +11,7 @@ package ollama
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/redtorchinc/node-agent/internal/config"
 	legacy "github.com/redtorchinc/node-agent/internal/ollama"
@@ -40,20 +41,24 @@ func (d *Detector) Name() string { return "ollama" }
 // the platform is configured `enabled: false` returns an empty Report
 // with Up=false — the caller can still surface "configured but disabled".
 func (d *Detector) Probe(ctx context.Context) platforms.Report {
+	intervalS := int64(d.client.CacheTTL() / time.Second)
 	if d.cfg.Enabled == "false" {
 		return platforms.Report{
-			Up:       false,
-			Endpoint: d.cfg.Endpoint,
-			Models:   []platforms.Model{},
+			Up:             false,
+			Endpoint:       d.cfg.Endpoint,
+			Models:         []platforms.Model{},
+			ProbeIntervalS: intervalS,
 		}
 	}
 	info := d.client.Probe(ctx)
 	rep := platforms.Report{
-		Up:           info.Up,
-		Endpoint:     info.Endpoint,
-		Models:       make([]platforms.Model, 0, len(info.Models)),
-		Runners:      make([]platforms.Runner, 0, len(info.Runners)),
-		LastScrapeTS: info.LastProbe,
+		Up:             info.Up,
+		Endpoint:       info.Endpoint,
+		Models:         make([]platforms.Model, 0, len(info.Models)),
+		Runners:        make([]platforms.Runner, 0, len(info.Runners)),
+		LastScrapeTS:   info.LastProbe,
+		ProbeIntervalS: intervalS,
+		Stale:          isStale(info.LastProbe, intervalS, time.Now().Unix()),
 	}
 	for _, m := range info.Models {
 		sz := m.SizeMB
@@ -85,6 +90,16 @@ func (d *Detector) Probe(ctx context.Context) platforms.Report {
 		})
 	}
 	return rep
+}
+
+// isStale reports whether last is more than 3 × intervalS seconds before now.
+// 3× is the standard staleness window — a single missed cache refresh is
+// noise, three is a probe wedged.
+func isStale(last, intervalS, now int64) bool {
+	if last == 0 || intervalS == 0 {
+		return false
+	}
+	return now-last > 3*intervalS
 }
 
 // parseQuantSuffix pulls a quantization tag out of an Ollama model name

@@ -73,9 +73,16 @@ var hardReasons = map[string]struct{}{
 func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	var reasons []string
 
+	// Operator opt-out: when platforms.ollama.enabled is explicitly false, this
+	// node doesn't run Ollama (e.g. vLLM-only GB10). r.Ollama.Up=false stays
+	// truthful in the payload, but the Ollama-derived reasons (ollama_down,
+	// agent_stale, ollama_runner_stuck) are suppressed so rank_nodes() doesn't
+	// hard-skip the box.
+	ollamaDisabled := cfg.Platforms.Ollama.Enabled == "false"
+
 	// --- hard reasons, in SPEC order ---
 
-	if !r.Ollama.Up {
+	if !r.Ollama.Up && !ollamaDisabled {
 		reasons = append(reasons, ReasonOllamaDown)
 	}
 	if r.Memory.SwapUsedPct > 75 {
@@ -84,7 +91,7 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if maxVRAMPct(r) > 95 {
 		reasons = append(reasons, ReasonVRAMOver95pct)
 	}
-	if r.Ollama.LastProbe > 0 && now.Unix()-r.Ollama.LastProbe > 60 {
+	if !ollamaDisabled && r.Ollama.LastProbe > 0 && now.Unix()-r.Ollama.LastProbe > 60 {
 		reasons = append(reasons, ReasonAgentStale)
 	}
 	if serviceCreep(r, creepCritical) {
@@ -125,7 +132,7 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if r.CPU.CoresLogical > 0 && r.CPU.Load1m > float64(2*r.CPU.CoresLogical) {
 		reasons = append(reasons, ReasonLoadAvgOver2xCores)
 	}
-	if runnerStuck(r) {
+	if !ollamaDisabled && runnerStuck(r) {
 		reasons = append(reasons, ReasonOllamaRunnerStuck)
 	}
 	if serviceCreep(r, creepWarn) {
@@ -166,9 +173,10 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 }
 
 // maxVRAMPct returns the largest VRAMUsedPct across all GPUs, or 0 if none.
-// On Apple Silicon (unified memory) the GPU entries have VRAMTotalMB=0 so
-// this returns 0 — use mem.UsedPct instead via the caller. That's by design:
-// the ranker reads memory.unified and mem.used_pct on those boxes.
+// On unified-memory hosts (Apple Silicon, NVIDIA GB10) the GPU's VRAM
+// ceiling and usage are back-filled from system memory in
+// applyUnifiedMemoryDerivation, so this function returns a real percentage
+// rather than 0 and vram_over_*pct can fire normally.
 func maxVRAMPct(r Report) float64 {
 	var m float64
 	for _, g := range r.GPUs {

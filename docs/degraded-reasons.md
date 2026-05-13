@@ -13,10 +13,10 @@ node). **soft** reasons stay in `reasons[]` but `degraded` may be false
 
 | Reason | Trigger |
 |---|---|
-| `ollama_down` | Ollama HTTP not responding within 2s. |
+| `ollama_down` | Ollama HTTP not responding within 2s. Suppressed when `platforms.ollama.enabled: false` (vLLM-only nodes). |
 | `swap_over_75pct` | Swap thrashing. |
 | `vram_over_95pct` | No room to load anything. |
-| `agent_stale` | Agent's own view of Ollama is older than 60s. |
+| `agent_stale` | Agent's own view of Ollama is older than 60s. Suppressed when `platforms.ollama.enabled: false`. |
 | `vram_service_creep_critical` | A tracked `service_allocators` entry shows `reserved_mb / allocated_mb > 3.0` AND `reserved_mb > threshold_critical_mb`. Catches the 2026-04-22-style PyTorch allocator leak. |
 
 ### Soft
@@ -26,7 +26,7 @@ node). **soft** reasons stay in `reasons[]` but `degraded` may be false
 | `swap_over_50pct` | (50, 75] swap. |
 | `vram_over_90pct` | (90, 95] VRAM. |
 | `load_avg_over_2x_cores` | CPU saturated. |
-| `ollama_runner_stuck` | Runner PID exists, CPU 0%, queued_requests > 0 for ≥ 60s. |
+| `ollama_runner_stuck` | Runner PID exists, CPU 0%, queued_requests > 0 for ≥ 60s. Suppressed when `platforms.ollama.enabled: false`. |
 | `vram_service_creep_warn` | `reserved/allocated > 2.0` AND `reserved > threshold_warn_mb` (only fires when `_critical` isn't already firing for the same entry). |
 
 ## v0.2.0 additions

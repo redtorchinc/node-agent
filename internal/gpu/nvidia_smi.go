@@ -180,8 +180,14 @@ func ParseNvidiaSMI(gpuCSV, procCSV []byte) ([]GPU, error) {
 			return strings.TrimSpace(row[i])
 		}
 		idx := atoi(get(fIndex))
-		total := atoi64(get(fMemTotal))
+		memTotalRaw := get(fMemTotal)
+		total := atoi64(memTotalRaw)
 		used := atoi64(get(fMemUsed))
+		// Unified-memory NVIDIA parts (GB10 Grace-Blackwell / DGX Spark) have
+		// no discrete VRAM pool, so nvidia-smi reports memory.total as [N/A].
+		// Flag the GPU so the health composer can derive a VRAM ceiling from
+		// system memory; otherwise vram_over_*pct never fires on these nodes.
+		unified := memTotalRaw == "[N/A]" || memTotalRaw == "N/A"
 		g := GPU{
 			Index:             idx,
 			UUID:              get(fUUID),
@@ -192,6 +198,7 @@ func ParseNvidiaSMI(gpuCSV, procCSV []byte) ([]GPU, error) {
 			VRAMTotalMB:       total,
 			VRAMUsedMB:        used,
 			VRAMUsedPct:       pct(used, total),
+			VRAMUnified:       unified,
 			UtilPct:           atoi(get(fUtilGPU)),
 			MemoryUtilPct:     atoi(get(fUtilMem)),
 			TempC:             atoi(get(fTempGPU)),

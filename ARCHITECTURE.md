@@ -204,7 +204,7 @@ platform genuinely can't supply the data — **never** fabricate a zero.
 | CPU usage % / per-core | ✅ | ✅ | ✅ |
 | CPU load avg | ✅ | ✅ | ❌ (no kernel load avg) |
 | CPU temps | ✅ (`/sys/class/hwmon`) | root-only via `powermetrics` | ✅ (WMI) |
-| GPU VRAM | ✅ (`nvidia-smi`) | `null` (unified — see `memory.unified`) | ✅ |
+| GPU VRAM | ✅ (`nvidia-smi`) | ✅ (unified — derived from `memory.total_mb`; `gpus[].vram_unified: true`, `memory.unified: true`) | ✅ |
 | GPU NVLink / MIG / ECC | ✅ | `null` | ✅ |
 | Per-process VRAM | ✅ | `null` (no public API) | ✅ |
 | Disk / network | ✅ | ✅ | ✅ |

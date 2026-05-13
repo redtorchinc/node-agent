@@ -49,6 +49,28 @@ func TestEvaluate_OllamaDown(t *testing.T) {
 	}
 }
 
+// vLLM-only nodes set platforms.ollama.enabled=false. Ollama.Up keeps being
+// reported truthfully as false, but ollama_down (and friends) must NOT fire
+// in degraded_reasons — otherwise the ranker hard-skips a healthy vLLM box.
+func TestEvaluate_OllamaDisabled_SuppressesOllamaReasons(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	r.Ollama.Up = false
+	r.Ollama.LastProbe = now.Unix() - 120 // would otherwise trip agent_stale
+	cfg := config.Config{}
+	cfg.Platforms.Ollama.Enabled = "false"
+	deg, reasons := Evaluate(r, cfg, now)
+	if deg {
+		t.Errorf("ollama-disabled node should not be degraded: %v", reasons)
+	}
+	if contains(reasons, ReasonOllamaDown) {
+		t.Errorf("ollama_down must be suppressed when ollama.enabled=false: %v", reasons)
+	}
+	if contains(reasons, ReasonAgentStale) {
+		t.Errorf("agent_stale must be suppressed when ollama.enabled=false: %v", reasons)
+	}
+}
+
 func TestEvaluate_SwapOver75(t *testing.T) {
 	now := time.Unix(1713820000, 0)
 	r := cleanReport(now)

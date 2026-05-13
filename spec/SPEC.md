@@ -156,7 +156,7 @@ Response:
 }
 ```
 
-`memory.unified: true` on Apple Silicon — signals to the ranker that RAM pressure = GPU pressure.
+`memory.unified: true` on unified-memory hosts (Apple Silicon, NVIDIA GB10 / Grace-Blackwell) — signals to the ranker that RAM pressure = GPU pressure. Per-GPU `gpus[].vram_unified: true` is set on the same hosts; on these the agent back-fills `vram_total_mb` from `memory.total_mb` and `vram_used_mb` from per-process accounting so `vram_used_pct` is a real percentage and `vram_over_*pct` reasons fire normally.
 
 ### `degraded_reasons` contract
 

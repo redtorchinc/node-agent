@@ -247,6 +247,8 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	}
 	rep.GPUs = gpus
 
+	applyUnifiedMemoryDerivation(&rep)
+
 	rep.ServiceAllocs = r.Allocators.Snapshot()
 	if rep.ServiceAllocs == nil {
 		rep.ServiceAllocs = []allocators.Scraped{}
@@ -302,6 +304,55 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	}
 
 	return rep, nil
+}
+
+// applyUnifiedMemoryDerivation fills the VRAM ceiling and usage for
+// unified-memory GPUs (Apple Silicon, NVIDIA GB10 Grace-Blackwell) and
+// flips memory.unified=true on the report. Required because nvidia-smi on
+// GB10 reports memory.total=[N/A] and Apple's system_profiler probe has
+// no per-process VRAM accounting — without this, vram_used_pct stays at
+// 0 and load-aware dispatch can't distinguish a saturated unified-memory
+// node from a fresh idle one.
+//
+// Derivation rule per unified GPU:
+//   - VRAMTotalMB: take from memory.total_mb when probe reports 0.
+//   - VRAMUsedMB:  sum the per-process accounting when probe reports 0.
+//     Falls back to memory.used_mb when no per-process data is available
+//     (Apple Silicon has none; the resulting "vram_used = host RAM used"
+//     is exactly the signal the ranker uses on Apple today).
+//   - VRAMUsedPct: recomputed from the derived total/used.
+func applyUnifiedMemoryDerivation(rep *Report) {
+	hasUnified := false
+	for i := range rep.GPUs {
+		g := &rep.GPUs[i]
+		if !g.VRAMUnified {
+			continue
+		}
+		hasUnified = true
+		if g.VRAMTotalMB == 0 {
+			g.VRAMTotalMB = rep.Memory.TotalMB
+		}
+		if g.VRAMUsedMB == 0 {
+			var sum int64
+			for _, p := range g.Processes {
+				sum += p.VRAMUsedMB
+			}
+			if sum > 0 {
+				g.VRAMUsedMB = sum
+			} else {
+				// No per-process accounting (Apple Silicon, or older nvidia-smi
+				// on GB10 without compute-apps support). Fall back to host RAM
+				// usage — on a unified-memory box that IS the GPU footprint.
+				g.VRAMUsedMB = rep.Memory.UsedMB
+			}
+		}
+		if g.VRAMTotalMB > 0 {
+			g.VRAMUsedPct = float64(g.VRAMUsedMB) / float64(g.VRAMTotalMB) * 100
+		}
+	}
+	if hasUnified {
+		rep.Memory.Unified = true
+	}
 }
 
 func probeCPU() CPUInfo {

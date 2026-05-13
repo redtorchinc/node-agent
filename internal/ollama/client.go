@@ -74,6 +74,10 @@ func NewClient(endpoint string) *Client {
 	}
 }
 
+// CacheTTL is the /api/ps response cache duration. Exposed so the platforms
+// adapter can surface it as probe_interval_s in /health.
+func (c *Client) CacheTTL() time.Duration { return c.cacheTTL }
+
 // Probe returns the current Ollama state. On error (including timeout) the
 // returned Info reports Up=false so the caller can fold it straight into
 // /health without special-casing.

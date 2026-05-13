@@ -52,9 +52,10 @@ func (AppleSilicon) Probe(ctx context.Context) ([]GPU, error) {
 			name = d.Name
 		}
 		gpus = append(gpus, GPU{
-			Index:     i,
-			Name:      name,
-			Processes: []Process{},
+			Index:       i,
+			Name:        name,
+			VRAMUnified: true,
+			Processes:   []Process{},
 		})
 	}
 	return gpus, nil

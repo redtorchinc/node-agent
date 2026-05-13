@@ -29,7 +29,7 @@ canonical example — kept in sync with the embedded default.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `enabled` | string | `auto` | `auto` \| `true` \| `false`. `auto` probes once at startup and on every `/health` request if reachable. |
+| `enabled` | string | `auto` | `auto` \| `true` \| `false`. `auto` probes once at startup and on every `/health` request if reachable. Setting `platforms.ollama.enabled: false` marks the node as vLLM-only — `platforms.ollama.up: false` keeps being reported, but `ollama_down` / `agent_stale` / `ollama_runner_stuck` are suppressed in `degraded_reasons` so the ranker doesn't hard-skip the node. |
 | `endpoint` | string | per-platform | Base URL. Ollama: `http://localhost:11434`. vLLM: `http://localhost:8000`. |
 | `metrics_endpoint` | string | `{endpoint}/metrics` | vLLM only. The Prometheus exposition is scraped for per-model queue depth, KV cache, latency histograms, and throughput. |
 | `required` | bool | false | vLLM only. When true and the probe fails, `vllm_required_down` becomes a hard `degraded_reason`. Otherwise `vllm_down` is soft. |

@@ -5,10 +5,13 @@ yourself via [ARCHITECTURE.md](ARCHITECTURE.md) before editing anything.
 
 ## Status
 
-**v0.2.0 shipped.** The agent is feature-complete for the inference plane
+**v0.2.x shipped.** The agent is feature-complete for the inference plane
 + allowlisted service control + training-mode coordination + RDMA fabric
-visibility. [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract
-(any change there is a cross-repo break). [V0_2_0_PLAN.md](V0_2_0_PLAN.md)
+visibility. v0.2.2 adds unified-memory NVIDIA (GB10 / Grace-Blackwell)
+detection, the `platforms.ollama.enabled: false` vLLM-only opt-out, and
+self-describing `probe_interval_s` / `stale` on `platforms.*`.
+[spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
+change there is a cross-repo break). [V0_2_0_PLAN.md](V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0
 build plan (now complete).
 

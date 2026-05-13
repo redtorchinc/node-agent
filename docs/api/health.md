@@ -15,7 +15,7 @@ fields they already know about.
   "hostname": "dgx-01",
   "os": "linux",
   "arch": "arm64",
-  "agent_version": "0.2.0",
+  "agent_version": "0.2.2",
   "uptime_s": 345123,
 
   "cpu": {
@@ -60,6 +60,7 @@ fields they already know about.
       "vram_total_mb": 81920,
       "vram_used_mb": 41280,
       "vram_used_pct": 50.4,
+      "vram_unified": false,
       "util_pct": 78,
       "temp_c": 71,
       "power_w": 412,
@@ -97,6 +98,8 @@ fields they already know about.
     "ollama": {
       "up": true,
       "endpoint": "http://localhost:11434",
+      "probe_interval_s": 5,
+      "stale": false,
       "models": [
         {"name": "nomic-embed-text-v2-moe:latest", "platform": "ollama", "loaded": true, "size_mb": 955}
       ],
@@ -105,6 +108,8 @@ fields they already know about.
     "vllm": {
       "up": true,
       "endpoint": "http://localhost:8000",
+      "probe_interval_s": 5,
+      "stale": false,
       "models": [
         {
           "name": "qwen3-vl:32b",
@@ -147,9 +152,14 @@ fields they already know about.
 
 Not every host can supply every field. The rules:
 
-- **Apple Silicon:** `gpus[].vram_*` is `null` / `0` — VRAM is unified
-  with system RAM. `memory.unified: true` signals this to the ranker.
-  `gpus[].temp_c` / `power_w` are `0` unless the agent runs as root.
+- **Unified-memory hosts (Apple Silicon, NVIDIA GB10 / Grace-Blackwell):**
+  `gpus[].vram_unified: true` and `memory.unified: true`. The agent
+  back-fills `vram_total_mb` from `memory.total_mb` and `vram_used_mb`
+  from per-process accounting (falling back to host `memory.used_mb`
+  when no per-process VRAM data exists, as on Apple Silicon). Result:
+  `vram_used_pct` is a real percentage on these boxes, not a misleading
+  `0.0`, and `vram_over_*pct` reasons fire normally. Apple Silicon
+  `gpus[].temp_c` / `power_w` are still `0` unless the agent runs as root.
 - **Windows:** `cpu.load_*` is `0` (no kernel load average). `time_sync`
   is omitted (no `w32tm` parser in v0.2).
 - **macOS / Windows:** `rdma` is always omitted.

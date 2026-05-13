@@ -24,6 +24,13 @@ metrics_enabled: false
 # Inference platforms. `enabled: auto` probes once at startup and keeps
 # checking on every /health request if reachable. Set to `false` to skip
 # a platform entirely on nodes that don't run it.
+#
+# Setting `platforms.ollama.enabled: false` is the supported way to mark a
+# node as vLLM-only (e.g. GB10 / DGX Spark). The agent still reports
+# `platforms.ollama.up: false` truthfully, but suppresses ollama_down /
+# agent_stale / ollama_runner_stuck in degraded_reasons so the ranker doesn't
+# hard-skip the node. Distinct from training_mode.disable_ollama_probe, which
+# stops probing entirely for the duration of a training drain.
 platforms:
   ollama:
     enabled: auto

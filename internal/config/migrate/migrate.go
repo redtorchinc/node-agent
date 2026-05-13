@@ -16,10 +16,12 @@ package migrate
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -48,6 +50,12 @@ type Result struct {
 // import cycle (config imports allocators which we don't need here).
 const CurrentVersion = 2
 
+// ErrBrokenYAML is returned by Migrate when the existing file cannot be
+// parsed as YAML. Callers (typically the install path) should respond by
+// calling ForceReset to back up the broken file and lay down defaults —
+// see internal/service/bootstrap.go for the standard recovery flow.
+var ErrBrokenYAML = errors.New("existing config.yaml is not valid YAML")
+
 // Migrate compares the YAML at existingPath against defaultYAML and, if any
 // top-level keys are missing from existingPath, writes a `<existingPath>.new`
 // file with those keys appended as commented YAML. Existing values and
@@ -58,6 +66,9 @@ const CurrentVersion = 2
 //
 // If existingPath does not exist, returns (Result{AlreadyCurrent: true}, nil)
 // since first-install writes a fresh config from the default elsewhere.
+//
+// If existingPath cannot be parsed as YAML, returns ErrBrokenYAML — callers
+// should respond with ForceReset.
 func Migrate(existingPath, defaultYAML string) (Result, error) {
 	existingBytes, err := os.ReadFile(existingPath)
 	if err != nil {
@@ -69,7 +80,7 @@ func Migrate(existingPath, defaultYAML string) (Result, error) {
 
 	var existingDoc yaml.Node
 	if err := yaml.Unmarshal(existingBytes, &existingDoc); err != nil {
-		return Result{}, fmt.Errorf("parse existing yaml: %w", err)
+		return Result{}, fmt.Errorf("%w: %v", ErrBrokenYAML, err)
 	}
 
 	var defaultDoc yaml.Node
@@ -133,6 +144,29 @@ func Migrate(existingPath, defaultYAML string) (Result, error) {
 		OldVersion:    existingVersion,
 		NewVersion:    CurrentVersion,
 	}, nil
+}
+
+// ForceReset is the recovery path for broken or unrecoverable configs.
+// It backs up the existing file (if any) to `<path>.broken-<unix-ts>` and
+// writes the embedded default to `path`. The token file and other agent
+// state are untouched.
+//
+// Returns the backup path (empty string if there was no existing file)
+// alongside any I/O error. Designed to be called by install paths and by
+// `rt-node-agent config migrate-force`.
+func ForceReset(path, defaultYAML string) (backupPath string, err error) {
+	if existing, statErr := os.Stat(path); statErr == nil && !existing.IsDir() {
+		backupPath = fmt.Sprintf("%s.broken-%d", path, time.Now().Unix())
+		if err := os.Rename(path, backupPath); err != nil {
+			return "", fmt.Errorf("back up %s → %s: %w", path, backupPath, err)
+		}
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", fmt.Errorf("stat %s: %w", path, statErr)
+	}
+	if err := os.WriteFile(path, []byte(defaultYAML), 0o644); err != nil {
+		return backupPath, fmt.Errorf("write defaults to %s: %w", path, err)
+	}
+	return backupPath, nil
 }
 
 // Banner returns a multi-line operator-facing message describing what

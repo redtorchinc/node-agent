@@ -3,6 +3,30 @@
 If the install one-liner didn't produce a working service, that's a bug
 worth filing. Common runtime issues below.
 
+## Service fails to start: "did not find expected key" / YAML parse error
+
+Your `/etc/rt-node-agent/config.yaml` doesn't parse as YAML — usually a
+missing colon, bad indentation, or a v0.1.x example that drifted from
+spec. The agent refuses to start rather than silently falling back to
+defaults (a surprise port/token change would be worse than a clear
+failure).
+
+Recover with one command:
+
+```sh
+sudo rt-node-agent config migrate-force
+sudo systemctl restart rt-node-agent
+```
+
+That backs up the broken file to `/etc/rt-node-agent/config.yaml.broken-<unix-ts>`
+and writes a fresh defaults file. The token at `/etc/rt-node-agent/token`
+is untouched. Copy any customised values out of the `.broken-` file into
+the new config and restart.
+
+The installer auto-runs this same path when it detects malformed YAML —
+this manual command is for the case where the service was running on a
+broken config that you later edited.
+
 ## "token not configured" (503) on /actions/*
 
 The token file is missing. On Linux, check `/etc/rt-node-agent/token` is

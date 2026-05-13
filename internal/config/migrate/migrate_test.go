@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,74 @@ func TestMigrate_MissingExistingFile_ReturnsAlreadyCurrent(t *testing.T) {
 	}
 	if !res.AlreadyCurrent {
 		t.Errorf("expected AlreadyCurrent=true when source file is absent")
+	}
+}
+
+func TestMigrate_BrokenYAML_ReturnsErrBrokenYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	// Missing colon on the third key — the kind of operator hand-edit
+	// (or v0.1.x example that drifted) that bricked a real DGX upgrade.
+	if err := os.WriteFile(cfg, []byte("port: 11435\nbind: 0.0.0.0\nbroken value here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Migrate(cfg, v2Default)
+	if err == nil {
+		t.Fatalf("expected ErrBrokenYAML, got nil")
+	}
+	if !errors.Is(err, ErrBrokenYAML) {
+		t.Errorf("expected errors.Is(err, ErrBrokenYAML)=true, got %v", err)
+	}
+}
+
+func TestForceReset_BacksUpExistingAndWritesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	// Broken file — exactly what ForceReset is designed to recover from.
+	original := "port: 11435\nbroken yaml syntax\n"
+	if err := os.WriteFile(cfg, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := ForceReset(cfg, v2Default)
+	if err != nil {
+		t.Fatalf("ForceReset: %v", err)
+	}
+	if backup == "" {
+		t.Fatalf("expected non-empty backup path")
+	}
+	if !strings.HasPrefix(backup, cfg+".broken-") {
+		t.Errorf("backup path = %q, want %s.broken-<ts>", backup, cfg)
+	}
+	// Backup contains the original content verbatim.
+	got, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("backup contents mismatch")
+	}
+	// Current file is the default.
+	got, err = os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "config_version: 2") {
+		t.Errorf("current file is not the v2 default: %s", string(got))
+	}
+}
+
+func TestForceReset_NoExistingFile_WritesDefaultsOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "missing.yaml")
+	backup, err := ForceReset(cfg, v2Default)
+	if err != nil {
+		t.Fatalf("ForceReset: %v", err)
+	}
+	if backup != "" {
+		t.Errorf("expected no backup, got %q", backup)
+	}
+	if _, err := os.Stat(cfg); err != nil {
+		t.Errorf("default file should exist after ForceReset, got %v", err)
 	}
 }
 

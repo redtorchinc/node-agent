@@ -103,10 +103,20 @@ info "done. health: http://127.0.0.1:${port}/health"
 info "the bearer token above is what the case-manager backend uses for POST /actions/*."
 
 # --- config migration banner ---
-# `rt-node-agent install` runs the migration internally and drops
-# /etc/rt-node-agent/config.yaml.new alongside the existing config when
-# new schema keys are available. Surface that here so operators don't
-# need to dig through service logs to discover it.
+# Two paths the installer's internal migrate may have taken:
+#   1. Existing config parses cleanly but is missing v0.2.0 keys →
+#      .new file is dropped alongside; operator reviews and `mv`s.
+#   2. Existing config was malformed YAML → auto-recovery: original
+#      backed up to .broken-<unix-ts>, fresh defaults laid down at the
+#      original path so the service can start. Surface this loudly.
+if ls /etc/rt-node-agent/config.yaml.broken-* >/dev/null 2>&1; then
+  broken=$(ls -t /etc/rt-node-agent/config.yaml.broken-* | head -1)
+  info ""
+  info "*** existing config.yaml was malformed YAML — auto-recovered: ***"
+  info "    your original: $broken"
+  info "    fresh config:  /etc/rt-node-agent/config.yaml"
+  info "    review the old, copy over any settings you'd customised, restart"
+fi
 if [ -f /etc/rt-node-agent/config.yaml.new ]; then
   info ""
   info "*** new config keys available — review and merge: ***"

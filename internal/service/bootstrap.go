@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,37 +12,66 @@ import (
 	"github.com/redtorchinc/node-agent/internal/config/migrate"
 )
 
-// writeConfigExample drops config.yaml.example into dir if missing. Idempotent —
-// never overwrites, so operator edits to an existing example survive reinstall.
-// The real config.yaml is left untouched; this is a template only.
+// writeConfigExample drops config.yaml.example into dir. Always overwrites,
+// because the example must match the current binary's schema — operators
+// rely on it as a reference when comparing a `.new` migration output. The
+// REAL config (config.yaml without the .example suffix) is untouched.
 //
-// Sources the content from config.DefaultYAML so the example, the migrate
-// reference, and the in-memory defaults all agree.
+// Sources from config.DefaultYAML so example, migrate reference, and
+// in-memory defaults all agree.
 func writeConfigExample(dir string) error {
 	p := filepath.Join(dir, "config.yaml.example")
-	if _, err := os.Stat(p); err == nil {
-		return nil
-	}
 	return os.WriteFile(p, []byte(config.DefaultYAML), 0o644)
 }
 
-// runConfigMigrate is called from the OS-specific install() right after the
-// agent user/dirs are in place. If /etc/rt-node-agent/config.yaml exists
-// and is older than the current schema (or has missing top-level keys),
-// it writes /etc/rt-node-agent/config.yaml.new with the missing keys
-// commented in, and prints a banner pointing the operator at the diff.
+// runConfigMigrate is called from the OS-specific install() right after
+// the agent user/dirs are in place. Two paths:
 //
-// Never overwrites the existing config — the merge requires operator review.
-// Token file is untouched.
+//  1. Normal upgrade — existing config.yaml parses cleanly but is missing
+//     v0.2.0 keys. Migrate writes config.yaml.new with the keys appended
+//     (commented). Operator reviews and `mv`s when ready.
+//  2. Broken existing config.yaml (YAML syntax error from a hand-edit gone
+//     wrong, or v0.1 file that never worked). Migrate returns ErrBrokenYAML;
+//     we automatically back up the broken file to config.yaml.broken-<ts>
+//     and write a fresh default config.yaml so the service can start. The
+//     operator's content isn't destroyed; just moved aside.
+//
+// Token file is NEVER touched.
 func runConfigMigrate(configPath string) {
 	res, err := migrate.Migrate(configPath, config.DefaultYAML)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "config migrate: %v\n", err)
+	if err == nil {
+		if banner := res.Banner(configPath); banner != "" {
+			fmt.Print(banner)
+		}
 		return
 	}
-	if banner := res.Banner(configPath); banner != "" {
-		fmt.Print(banner)
+	if errors.Is(err, migrate.ErrBrokenYAML) {
+		backup, ferr := migrate.ForceReset(configPath, config.DefaultYAML)
+		if ferr != nil {
+			fmt.Fprintf(os.Stderr, "config migrate-force failed: %v\n", ferr)
+			return
+		}
+		fmt.Print(brokenYAMLBanner(configPath, backup, err))
+		return
 	}
+	// Other I/O errors (permissions, disk full): surface them but don't
+	// abort the install — the service may still come up with defaults.
+	fmt.Fprintf(os.Stderr, "config migrate: %v\n", err)
+}
+
+func brokenYAMLBanner(configPath, backup string, cause error) string {
+	return fmt.Sprintf(`
+*** rt-node-agent: existing config.yaml could not be parsed — auto-recovered ***
+  cause:   %v
+  backup:  %s
+  current: %s (now contains v0.2.0 defaults; edit and restart to apply changes)
+
+  diff your old config:  diff %s %s
+  restart after editing: sudo systemctl restart rt-node-agent
+
+The token file at /etc/rt-node-agent/token was not touched.
+
+`, cause, backup, configPath, backup, configPath)
 }
 
 // generateToken returns a 64-char hex-encoded 32-byte random token — the same

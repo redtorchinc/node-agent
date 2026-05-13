@@ -67,13 +67,26 @@ try {
     Say "done. /health: http://127.0.0.1:$port/health"
     Say "the bearer token above is what the case-manager backend uses for POST /actions/*."
 
+    # Auto-recovery: existing config was malformed YAML, so the installer
+    # backed it up and laid down defaults so the service can start.
+    $cfgDir = Join-Path $env:ProgramData 'rt-node-agent'
+    $broken = Get-ChildItem -Path $cfgDir -Filter 'config.yaml.broken-*' -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($broken) {
+        Say ''
+        Say '*** existing config.yaml was malformed YAML — auto-recovered: ***'
+        Say "    your original: $($broken.FullName)"
+        Say "    fresh config:  $cfgDir\config.yaml"
+        Say '    review the old, copy over any settings you customised, restart'
+    }
+
     # Surface new config keys if migrate dropped a .new file.
-    $cfgNew = Join-Path $env:ProgramData 'rt-node-agent\config.yaml.new'
+    $cfgNew = Join-Path $cfgDir 'config.yaml.new'
     if (Test-Path $cfgNew) {
         Say ''
         Say '*** new config keys available — review and merge: ***'
-        Say "    Compare-Object (gc $env:ProgramData\rt-node-agent\config.yaml) (gc $cfgNew)"
-        Say "    Move-Item -Force $cfgNew $env:ProgramData\rt-node-agent\config.yaml"
+        Say "    Compare-Object (gc $cfgDir\config.yaml) (gc $cfgNew)"
+        Say "    Move-Item -Force $cfgNew $cfgDir\config.yaml"
         Say '    Restart-Service rt-node-agent'
     }
 } finally {

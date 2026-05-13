@@ -167,6 +167,11 @@ func defaultStateFilePath() string {
 
 // Load builds a Config from file (if present) overridden by env. Missing
 // config file is not an error — the agent must run out of the box.
+//
+// When the config file exists but doesn't parse as YAML, Load returns an
+// error annotated with the recovery path (`config migrate-force`). The
+// agent refuses to start rather than silently running on defaults — a
+// surprise port/token change would be worse than a clear failure.
 func Load() (Config, error) {
 	c := Defaults()
 
@@ -175,6 +180,14 @@ func Load() (Config, error) {
 		path = DefaultConfigPath()
 	}
 	if err := loadFile(path, &c); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		// Distinguish YAML-parse failures from I/O failures so the agent
+		// can point the operator at the right recovery action.
+		if _, ok := err.(*yaml.TypeError); ok {
+			return c, configError(path, err)
+		}
+		if isYAMLSyntaxError(err) {
+			return c, configError(path, err)
+		}
 		return c, fmt.Errorf("read %s: %w", path, err)
 	}
 
@@ -201,6 +214,40 @@ func loadFile(path string, c *Config) error {
 		return err
 	}
 	return yaml.Unmarshal(b, c)
+}
+
+// isYAMLSyntaxError reports whether err is a yaml.v3 syntax error.
+// yaml.v3 doesn't export its internal error types, so we match on the
+// error string. The pattern is stable across releases.
+func isYAMLSyntaxError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.HasPrefix(s, "yaml:") &&
+		(strings.Contains(s, "did not find expected") ||
+			strings.Contains(s, "found character") ||
+			strings.Contains(s, "mapping values are not allowed") ||
+			strings.Contains(s, "could not find expected") ||
+			strings.Contains(s, "found unexpected"))
+}
+
+// configError wraps a parse failure with an operator-friendly hint about
+// how to recover.
+func configError(path string, cause error) error {
+	return fmt.Errorf(`%w
+
+The config file at %s exists but does not parse as YAML. To recover:
+
+  sudo rt-node-agent config migrate-force
+
+That backs up the broken file to %s.broken-<timestamp> and writes a fresh
+config.yaml from the embedded defaults. Your token at /etc/rt-node-agent/token
+is untouched. After it returns:
+
+  sudo systemctl restart rt-node-agent
+
+Or fix the YAML by hand and restart`, cause, path, path)
 }
 
 func applyEnv(c *Config) {

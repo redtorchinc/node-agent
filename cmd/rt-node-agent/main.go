@@ -35,7 +35,8 @@ Commands:
   stop            Stop an installed service
   version         Print version info
   healthcheck     Run /health logic once and exit (0=healthy, 1=degraded)
-  config migrate  Surface new config keys as a commented diff (writes .new file)
+  config migrate        Surface new config keys as a commented diff (writes .new file)
+  config migrate-force  Back up the existing config and write defaults (recovery)
   update          Replace the binary from the latest release and restart the service
 
 Environment:
@@ -165,24 +166,36 @@ func runHealthcheck() error {
 }
 
 // runConfigCommand dispatches subcommands under `rt-node-agent config ...`.
-// Currently exposes one subcommand:
+// Subcommands:
 //
-//	migrate   Compare the on-disk config against the embedded default and
-//	          write a `.new` sibling with missing top-level keys appended
-//	          (commented). Never modifies the original file.
+//	migrate         Compare the on-disk config against the embedded default
+//	                and write a `.new` sibling with missing top-level keys
+//	                appended (commented). Never modifies the original file.
+//	migrate-force   Back up the existing config to <path>.broken-<unix-ts>
+//	                and write a fresh defaults file in its place. Recovery
+//	                path for broken YAML; explicit operator opt-in for
+//	                replacing a v0.1.x config with v0.2.0 defaults.
 func runConfigCommand(args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: rt-node-agent config migrate")
+		fmt.Fprintln(os.Stderr, "usage: rt-node-agent config (migrate | migrate-force)")
 		return fmt.Errorf("missing subcommand")
+	}
+	path := os.Getenv("RT_AGENT_CONFIG")
+	if path == "" {
+		path = config.DefaultConfigPath()
 	}
 	switch args[0] {
 	case "migrate":
-		path := os.Getenv("RT_AGENT_CONFIG")
-		if path == "" {
-			path = config.DefaultConfigPath()
-		}
 		res, err := migrate.Migrate(path, config.DefaultYAML)
 		if err != nil {
+			// On broken YAML, point the operator at the recovery command
+			// rather than just dumping the parse error.
+			if errors.Is(err, migrate.ErrBrokenYAML) {
+				fmt.Fprintf(os.Stderr,
+					"config at %s is not valid YAML.\nRun: sudo rt-node-agent config migrate-force\nThat backs up the broken file and writes defaults.\nCause: %v\n",
+					path, err)
+				return err
+			}
 			return err
 		}
 		if res.AlreadyCurrent {
@@ -191,9 +204,21 @@ func runConfigCommand(args []string) error {
 		}
 		fmt.Print(res.Banner(path))
 		return nil
+	case "migrate-force":
+		backup, err := migrate.ForceReset(path, config.DefaultYAML)
+		if err != nil {
+			return err
+		}
+		if backup == "" {
+			fmt.Printf("wrote fresh config at %s (no prior file)\n", path)
+		} else {
+			fmt.Printf("backed up %s → %s\nwrote fresh config at %s (from v%d defaults)\nReview, edit, then: sudo systemctl restart rt-node-agent\n",
+				path, backup, path, config.SchemaVersion)
+		}
+		return nil
 	default:
 		fmt.Fprintln(os.Stderr, "unknown config subcommand:", args[0])
-		fmt.Fprintln(os.Stderr, "available: migrate")
+		fmt.Fprintln(os.Stderr, "available: migrate, migrate-force")
 		return fmt.Errorf("unknown subcommand")
 	}
 }

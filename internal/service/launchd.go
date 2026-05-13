@@ -3,11 +3,13 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -68,28 +70,46 @@ func install() error {
 		return fmt.Errorf("bootstrap token: %w", err)
 	}
 
-	plist := fmt.Sprintf(plistTemplate, launchdLabel, exe, logMacOut, logMacErr)
-	if err := os.WriteFile(launchdPlist, []byte(plist), 0o644); err != nil {
+	// Order matters here. A prior version of the agent may already be
+	// bootstrapped under our label, AND launchctl is strict about plist
+	// ownership (must be root:wheel mode 0644) AND about not seeing the
+	// on-disk plist mutate mid-bootstrap. The sequence that survives all
+	// of those:
+	//
+	//   1. bootout the OLD service while the OLD plist is still on disk
+	//      — the kernel reads the plist to identify what to tear down.
+	//      Overwriting first leaves it half-bootstrapped → EIO.
+	//   2. (optionally) wait briefly for the daemon to exit; on a slow
+	//      box the bootstrap can race the bootout teardown.
+	//   3. Write the new plist using /usr/bin/install with -o root -g
+	//      wheel -m 644 so we get the exact ownership launchctl wants.
+	//      os.WriteFile would inherit the parent shell's group (often
+	//      staff under sudo), which silently makes bootstrap fail with
+	//      EIO on some macOS releases.
+	//   4. Whitelist the binary with the Application Firewall.
+	//   5. Bootstrap.
+	//
+	// If bootout fails because no prior install exists, that's expected
+	// on a fresh box — only surface bootout errors that come back with
+	// something other than "service not found" (exit 113).
+	allowFirewall(exe)
+	bootoutExisting(launchdLabel, launchdPlist)
+
+	if err := writeRootWheelFile(launchdPlist, plistTemplate, launchdLabel, exe, logMacOut, logMacErr); err != nil {
 		return fmt.Errorf("write plist: %w", err)
 	}
-	// Whitelist with the macOS Application Firewall. If the firewall is off,
-	// these calls are silent no-ops; if on, they stop it from dropping
-	// incoming connections to the agent's port. Errors are logged but not
-	// fatal — a misconfigured firewall shouldn't block install on a box
-	// where the firewall isn't in use.
-	allowFirewall(exe)
 
-	// Defensive `bootout`: if a prior version of the agent is already
-	// bootstrapped under our label, `bootstrap` fails with "Bootstrap
-	// failed: 5: Input/output error" (EIO). Tearing it down first makes
-	// re-install idempotent. We discard stderr because a non-loaded
-	// label produces a confusing "Boot-out failed: 113: Could not find
-	// specified service" — expected on a fresh install.
-	_ = runLaunchctlQuiet("bootout", "system/"+launchdLabel)
-
-	// Bootstrap loads + starts in one step on modern macOS.
+	// Bootstrap loads + starts in one step on modern macOS. If it still
+	// fails after the defensive bootout, surface a manual-recovery hint
+	// pointing at the canonical sequence so the operator isn't guessing.
 	if err := runLaunchctl("bootstrap", "system", launchdPlist); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w (try: sudo launchctl bootout system/%s && sudo rt-node-agent install)", err, launchdLabel)
+		return fmt.Errorf(`launchctl bootstrap: %w
+
+A previous load is likely wedged. Recover by hand:
+  sudo launchctl bootout system/%s 2>/dev/null
+  sudo rm -f %s
+  sudo pkill -f %s
+  sudo rt-node-agent install`, err, launchdLabel, launchdPlist, exe)
 	}
 	_ = runLaunchctl("enable", "system/"+launchdLabel)
 	fmt.Println("rt-node-agent installed and started (launchd)")
@@ -192,4 +212,79 @@ func runLaunchctl(args ...string) error {
 // clutter the install output.
 func runLaunchctlQuiet(args ...string) error {
 	return exec.Command("launchctl", args...).Run()
+}
+
+// bootoutExisting tears down a prior install. Two passes: the modern
+// label form, then the legacy plist-path form, because a service
+// bootstrapped on an older macOS may not be addressable by label.
+// Stderr is captured and only surfaced if it doesn't match the
+// "service not found" case (exit 113), which is expected on a fresh
+// install. After bootout, wait up to 2s for the daemon process to
+// exit — racing the teardown causes bootstrap to fail with EIO.
+func bootoutExisting(label, plistPath string) {
+	for _, args := range [][]string{
+		{"bootout", "system/" + label},
+		{"bootout", "system", plistPath},
+	} {
+		cmd := exec.Command("launchctl", args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err == nil {
+			break
+		}
+		// Exit code 113 (or its string form) = "Could not find specified
+		// service" — fine, just nothing to remove.
+		msg := stderr.String()
+		if strings.Contains(msg, "Could not find") || strings.Contains(msg, "113") {
+			continue
+		}
+		// Anything else is worth showing the operator (won't abort
+		// install — the subsequent bootstrap might still succeed).
+		fmt.Fprintf(os.Stderr, "launchctl %s: %v: %s\n", strings.Join(args, " "), err, strings.TrimSpace(msg))
+	}
+	// Best-effort settle. macOS sometimes returns from bootout before
+	// the process has fully exited; an immediate bootstrap then races
+	// the teardown. 250ms × 8 = 2s max is small relative to install
+	// time and saves a wedged daemon.
+	for i := 0; i < 8; i++ {
+		if !labelLoaded(label) {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// labelLoaded reports whether `launchctl print system/<label>` succeeds
+// (meaning the kernel still has the service bootstrapped). Used to wait
+// out the teardown between bootout and bootstrap.
+func labelLoaded(label string) bool {
+	return exec.Command("launchctl", "print", "system/"+label).Run() == nil
+}
+
+// writeRootWheelFile renders the plist and writes it with explicit
+// root:wheel ownership and mode 0644. /usr/bin/install handles the
+// chown+chmod in one syscall; falling back to os.WriteFile + chown
+// would race a launchctl tail that's already watching the path.
+func writeRootWheelFile(dst, tmpl string, args ...interface{}) error {
+	content := fmt.Sprintf(tmpl, args...)
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".plist.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// /usr/bin/install -o root -g wheel -m 644 src dst — atomic rename
+	// into place with the exact ownership launchctl requires.
+	cmd := exec.Command("/usr/bin/install", "-o", "root", "-g", "wheel", "-m", "644", tmpName, dst)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

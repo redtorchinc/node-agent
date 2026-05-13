@@ -43,6 +43,17 @@ const (
 	ReasonRDMALinkDegraded     = "rdma_link_degraded"
 )
 
+// hasSoftReason reports whether any element of reasons is NOT in
+// hardReasons. Used by the composer to set Report.DegradedSoft.
+func hasSoftReason(reasons []string) bool {
+	for _, r := range reasons {
+		if _, hard := hardReasons[r]; !hard {
+			return true
+		}
+	}
+	return false
+}
+
 // hardReasons is the set whose presence sets Report.Degraded=true. All
 // other reasons are "soft" (deprioritize but usable).
 var hardReasons = map[string]struct{}{
@@ -247,7 +258,15 @@ func vllmSoftDown(r Report, cfg config.Config) bool {
 	if cfg.Platforms.VLLM.Required {
 		return false // covered by vllm_required_down (hard)
 	}
-	if cfg.Platforms.VLLM.Enabled == "false" {
+	// Only fire when the operator explicitly enabled vLLM monitoring.
+	//   "true"   → fire on failure (operator wants to be told)
+	//   "auto"   → best-effort detection; do NOT fire on failure
+	//   "false"  → don't probe at all
+	// Pre-v0.2.8 "auto" fired vllm_down — which flooded every Ollama-only
+	// host with the noise (see issue #11). The "auto" semantic is now
+	// "probe and report state, but don't escalate to degraded_reasons"
+	// — consumers who care read platforms.vllm.up directly.
+	if cfg.Platforms.VLLM.Enabled != "true" {
 		return false
 	}
 	p, ok := r.Platforms["vllm"]

@@ -35,14 +35,18 @@ type Interface struct {
 
 // Probe returns interface state. Best-effort; fields default to zero on
 // any source error.
+//
+// macOS-specific note: an earlier version called `net.LookupHost(h)` to
+// "confirm" the hostname resolved — except both branches set
+// HostnameFQDN to the unqualified hostname anyway, so the DNS
+// round-trip was pure dead weight. On darwin without a configured
+// resolver for the local hostname, that lookup blocked for the full 5s
+// resolver timeout and dominated /health latency. Removed; we emit the
+// unqualified hostname directly.
 func Probe() Info {
 	out := Info{Interfaces: []Interface{}}
 	if h, err := os.Hostname(); err == nil {
-		if addrs, err := net.LookupHost(h); err == nil && len(addrs) > 0 {
-			out.HostnameFQDN = h
-		} else {
-			out.HostnameFQDN = h
-		}
+		out.HostnameFQDN = h
 	}
 
 	ifaces, err := net.Interfaces()

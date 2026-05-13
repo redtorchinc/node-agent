@@ -52,7 +52,7 @@ node). **soft** reasons stay in `reasons[]` but `degraded` may be false
 | `cpu_thermal_throttling` | `cpu.throttled == true`. Skipped when the metric is `null` (e.g. macOS without root). |
 | `gpu_thermal_throttling` | Any `gpu.throttle_reasons` contains `HW_THERMAL_SLOWDOWN` or `SW_THERMAL_SLOWDOWN`. |
 | `gpu_power_throttling` | Any `gpu.throttle_reasons` contains `HW_POWER_BRAKE_SLOWDOWN` or `SW_POWER_CAP`. |
-| `vllm_down` | Configured `platforms.vllm.enabled != false` but probe fails AND `required` is not set. |
+| `vllm_down` | `platforms.vllm.enabled: true` AND probe fails AND `required` is not set. Since v0.2.8 the `auto` value is best-effort detection only — it does NOT fire `vllm_down` on Ollama-only hosts. To re-enable monitoring of vLLM availability, set `platforms.vllm.enabled: true` explicitly. |
 | `rdma_errors_growing` | Reserved for future use (counter-delta tracking is a follow-up). |
 | `rdma_pfc_storm` | Reserved. |
 | `rdma_link_degraded` | Active port with `rate_gbps < 200`. |

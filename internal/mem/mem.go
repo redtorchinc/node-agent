@@ -77,6 +77,7 @@ func Probe(_ context.Context) (Info, error) {
 		Unified:     unified(),
 	}
 	if psi := probePSI(); psi != nil {
+		// Linux PSI path: classification + 4 raw gauges.
 		i.Pressure = psi.Classification
 		some10 := psi.SomeAvg10
 		some60 := psi.SomeAvg60
@@ -86,6 +87,11 @@ func Probe(_ context.Context) (Info, error) {
 		i.PressureSomeAvg60 = &some60
 		i.PressureFullAvg10 = &full10
 		i.PressureFullAvg60 = &full60
+	} else if p := probePressure(); p != "" {
+		// Non-Linux fallback: classification only (no PSI-equivalent raw
+		// gauges exist on darwin / Windows). probePressure on darwin
+		// reads kern.memorystatus_vm_pressure_level via sysctl.
+		i.Pressure = p
 	}
 	if pIn, pOut, ok := probeSwapCounters(); ok {
 		i.SwapInPagesTotal = &pIn

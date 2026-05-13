@@ -12,7 +12,12 @@ detection, the `platforms.ollama.enabled: false` vLLM-only opt-out, and
 self-describing `probe_interval_s` / `stale` on `platforms.*`. v0.2.3
 adds raw swap counters + PSI gauges, `top_swap_processes[]`,
 auto-detected `databases[]` (20 fingerprints), and auto-detected
-`storage[]` (ZFS / NFS / CIFS / Ceph / GlusterFS / Lustre). All v0.2.x
+`storage[]` (ZFS / NFS / CIFS / Ceph / GlusterFS / Lustre). v0.2.7
+ships in-place config migration (config.yaml.bak), and v0.2.8 fixes
+darwin /health latency (the 5s DNS dead-weight removed), populates
+darwin cpu.vendor / cpu.usage_pct / memory.pressure natively, makes
+vllm_down opt-in (no longer fires under `auto`), and splits the
+degraded boolean into `degraded_hard` / `degraded_soft`. All v0.2.x
 additions are additive — no config, no breaking changes.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [V0_2_0_PLAN.md](V0_2_0_PLAN.md)

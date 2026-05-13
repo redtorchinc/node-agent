@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -89,7 +90,24 @@ type Report struct {
 	Mode     string         `json:"mode"`
 	Training *TrainingState `json:"training,omitempty"`
 
-	Degraded        bool     `json:"degraded"`
+	// Degraded is true iff any HARD reason fires. Kept for v0.1.x / v0.2.x
+	// backend compatibility — equivalent to DegradedHard. Will be removed
+	// in v0.3.0 once all consumers switch to the explicit booleans.
+	Degraded bool `json:"degraded"`
+
+	// DegradedHard is true iff any hard reason is present in DegradedReasons.
+	// Dispatchers must skip a node where DegradedHard=true.
+	DegradedHard bool `json:"degraded_hard"`
+
+	// DegradedSoft is true iff any soft reason is present in DegradedReasons.
+	// Dispatchers may deprioritize but still use a soft-degraded node.
+	// DegradedHard and DegradedSoft are independent — both can be true if
+	// both kinds of reasons are firing.
+	DegradedSoft bool `json:"degraded_soft"`
+
+	// DegradedReasons is the unified list (hard first in SPEC order, then
+	// soft in SPEC order). Membership is the source of truth; the booleans
+	// are derived.
 	DegradedReasons []string `json:"degraded_reasons"`
 }
 
@@ -213,6 +231,15 @@ func (r *Reporter) SetModeReporter(m ModeReporter) { r.mode = m }
 // successful warm. The case-manager's 2s client timeout retries are
 // designed for this.
 func (r *Reporter) StartBackground(ctx context.Context) {
+	// Seed gopsutil's internal cpu.Times snapshot so the first /health
+	// call's cpu.Percent(0, …) returns a real delta rather than 0.
+	// Without this seed, /health on a freshly-started agent reports
+	// usage_pct: 0 (or nil on flake) until the second call.
+	go func() {
+		_, _ = cpu.Percent(0, false)
+		_, _ = cpu.Percent(0, true)
+	}()
+
 	go func() {
 		wctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -344,6 +371,8 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 
 	deg, reasons := Evaluate(rep, r.Cfg, r.now())
 	rep.Degraded = deg
+	rep.DegradedHard = deg
+	rep.DegradedSoft = hasSoftReason(reasons)
 	rep.DegradedReasons = reasons
 	if rep.DegradedReasons == nil {
 		rep.DegradedReasons = []string{}
@@ -422,10 +451,12 @@ func probeCPU() CPUInfo {
 			c.FreqMHzCurrent = &cur
 		}
 	}
-	// usage_pct: gopsutil's cpu.Percent(0,…) returns instantaneous; "0"
-	// interval means delta-since-last-call, which on a fresh agent yields
-	// 0. Tiny 100ms sample is acceptable for /health (cached upstream).
-	if pct, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(pct) > 0 {
+	// usage_pct: gopsutil's cpu.Percent(0, …) returns delta-since-last-call
+	// — instant, no sleep. StartBackground seeds the internal "last times"
+	// state at agent start so the first /health call gets a real value
+	// rather than 0 or nil. The previous 100ms sample interval was
+	// 100ms × every-/health-call wasted on darwin where /health is hot.
+	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
 		v := round2(pct[0])
 		c.UsagePct = &v
 	}
@@ -434,6 +465,13 @@ func probeCPU() CPUInfo {
 		for i, v := range per {
 			c.UsagePerCorePct[i] = round2(v)
 		}
+	}
+	// Apple Silicon: gopsutil leaves cpu.Info.VendorID empty (Apple
+	// doesn't populate the legacy x86 VendorID register). Hardcode the
+	// canonical value so consumers don't have to special-case nil.
+	// Same logic for Asahi Linux on Apple hardware (model contains "Apple").
+	if c.Vendor == "" && (runtime.GOOS == "darwin" || strings.Contains(c.Model, "Apple")) {
+		c.Vendor = "Apple"
 	}
 	if temps, err := host.SensorsTemperatures(); err == nil {
 		for _, t := range temps {

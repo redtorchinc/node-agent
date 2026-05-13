@@ -10,6 +10,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/gpu"
 	"github.com/redtorchinc/node-agent/internal/mem"
 	"github.com/redtorchinc/node-agent/internal/ollama"
+	"github.com/redtorchinc/node-agent/internal/platforms"
 )
 
 // cleanReport returns a Report with nothing wrong: ollama up, low memory,
@@ -46,6 +47,58 @@ func TestEvaluate_OllamaDown(t *testing.T) {
 	deg, reasons := Evaluate(r, config.Config{}, now)
 	if !deg || !contains(reasons, ReasonOllamaDown) {
 		t.Errorf("want ollama_down hard, got %v %v", deg, reasons)
+	}
+}
+
+// Issue #11: vllm_down must NOT fire on hosts that have not explicitly
+// opted into vLLM monitoring. Before v0.2.8, "auto" (the default) fired
+// vllm_down whenever the probe failed — flooding every Ollama-only host
+// with the noise. Now only enabled=true fires.
+func TestEvaluate_VLLMAutoDoesNotFireVLLMDown(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	// Simulate a vLLM probe that failed (typical Ollama-only host).
+	r.Platforms = map[string]platforms.Report{
+		"vllm": {Up: false, Endpoint: "http://localhost:8000"},
+	}
+	cfg := config.Config{}
+	cfg.Platforms.VLLM.Enabled = "auto"
+	_, reasons := Evaluate(r, cfg, now)
+	if contains(reasons, ReasonVLLMDown) {
+		t.Errorf("vllm_down must NOT fire on `enabled: auto` host: %v", reasons)
+	}
+}
+
+// With explicit `enabled: true`, vllm_down fires on probe failure
+// (operator opted into being told about vLLM outages).
+func TestEvaluate_VLLMTrueFiresVLLMDown(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	r.Platforms = map[string]platforms.Report{
+		"vllm": {Up: false, Endpoint: "http://localhost:8000"},
+	}
+	cfg := config.Config{}
+	cfg.Platforms.VLLM.Enabled = "true"
+	_, reasons := Evaluate(r, cfg, now)
+	if !contains(reasons, ReasonVLLMDown) {
+		t.Errorf("vllm_down must fire on `enabled: true` host with down probe: %v", reasons)
+	}
+}
+
+// Issue #12: hasSoftReason must distinguish hard vs. soft reasons so the
+// composer can set degraded_soft correctly. Mixed case: both kinds fire.
+func TestHasSoftReason(t *testing.T) {
+	if hasSoftReason(nil) {
+		t.Errorf("empty reasons → no soft")
+	}
+	if hasSoftReason([]string{ReasonOllamaDown}) {
+		t.Errorf("only hard reasons → hasSoftReason=false")
+	}
+	if !hasSoftReason([]string{ReasonSwapOver50pct}) {
+		t.Errorf("soft reason → hasSoftReason=true")
+	}
+	if !hasSoftReason([]string{ReasonOllamaDown, ReasonSwapOver50pct}) {
+		t.Errorf("mixed hard+soft → hasSoftReason=true")
 	}
 }
 

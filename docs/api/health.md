@@ -166,9 +166,28 @@ fields they already know about.
   "training": null,
 
   "degraded": false,
+  "degraded_hard": false,
+  "degraded_soft": false,
   "degraded_reasons": []
 }
 ```
+
+### `degraded` vs. `degraded_hard` / `degraded_soft`
+
+The `degraded_reasons` array is the source of truth — the three booleans
+are derived. `degraded_hard` is true iff any HARD reason is firing;
+`degraded_soft` is true iff any SOFT reason is firing. Both can be true
+simultaneously (a node with both hard + soft reasons).
+
+`degraded` is kept for v0.1.x / v0.2.x backend compatibility — it
+mirrors `degraded_hard`. New consumers should branch on `degraded_hard`
+(skip the node) and `degraded_soft` (deprioritize) independently. The
+legacy `degraded` field will be removed in v0.3.0.
+
+Pre-v0.2.8 the agent emitted `degraded: false` alongside non-empty
+`degraded_reasons` when only soft reasons fired, which read as
+self-contradictory; the explicit `degraded_hard` / `degraded_soft`
+removes that ambiguity.
 
 ## Per-architecture coverage
 

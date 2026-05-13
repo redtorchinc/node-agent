@@ -43,15 +43,31 @@ type Detector struct {
 // New returns a detector for the given platform entry.
 func New(entry config.PlatformEntry) *Detector {
 	return &Detector{
-		cfg:      entry,
-		http:     &http.Client{Timeout: 2 * time.Second},
-		now:      time.Now,
-		cacheTTL: 5 * time.Second,
+		cfg:  entry,
+		http: &http.Client{Timeout: 2 * time.Second},
+		now:  time.Now,
+		// 30s matches the case-manager's response cache so backend polls
+		// always hit warm. The keep-warm ticker in
+		// internal/health/StartBackground refreshes under this TTL so
+		// idle agents stay warm.
+		cacheTTL: 30 * time.Second,
 	}
 }
 
 // Name returns "vllm".
 func (d *Detector) Name() string { return "vllm" }
+
+// Refresh clears the cached report and runs Probe immediately. Used by
+// the keep-warm ticker in internal/health/StartBackground so /health
+// readers always hit a populated cache, not a cold cache primed by
+// their own request.
+func (d *Detector) Refresh(ctx context.Context) {
+	d.mu.Lock()
+	d.cached = nil
+	d.cachedAt = time.Time{}
+	d.mu.Unlock()
+	_ = d.Probe(ctx)
+}
 
 // Probe assembles a platforms.Report. Returns Up=false on any unreachable
 // endpoint. When `enabled: false` short-circuits without a network call.

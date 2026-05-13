@@ -5,16 +5,18 @@ import "time"
 // probeCacheTTL bounds /health p99 by making repeated calls cheap. The
 // underlying probes (nvidia-smi, system_profiler) can spike to 1-2s under
 // host load, which violates the case-manager's 2s client timeout on
-// /health. 5s is chosen as a compromise:
-//   - short enough that VRAM util / temp / power numbers stay close to
-//     real-time, so the ranker doesn't make decisions from stale data
-//   - long enough that a burst of backend calls (multiple workers hitting
-//     the same node) collapses to a single subprocess invocation
+// /health.
+//
+// 30s is sized to outlast the case-manager's own 30s response cache —
+// otherwise every backend poll catches our cache cold and pays the full
+// system_profiler / nvidia-smi cost. A keep-warm ticker in
+// internal/health/StartBackground refreshes the cache every ~25s so
+// idle agents stay warm too.
 //
 // Numbers that matter for degraded_reasons (vram_over_95pct and friends)
-// don't flip within 5s in practice — VRAM shifts by a few MB, not by
-// thresholds.
-const probeCacheTTL = 5 * time.Second
+// don't flip within 30s in practice — VRAM shifts by tens of MB during
+// active inference, not by entire utilisation tiers.
+const probeCacheTTL = 30 * time.Second
 
 // Select returns a cached Probe appropriate for the current host. On
 // darwin/arm64 the Apple Silicon probe is preferred; on any OS where

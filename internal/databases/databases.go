@@ -36,11 +36,13 @@ func sortDatabases(s []Database) {
 	})
 }
 
-// cacheTTL is the same 5s we use for GPU / Ollama / vLLM probes. DB
-// presence on a node doesn't flip second-to-second, and net.Connections
-// on macOS shells out to lsof which spikes to 5–10s under load. Caching
-// keeps /health under its 2s client budget after the first warm call.
-const cacheTTL = 5 * time.Second
+// cacheTTL outlasts the case-manager's 30s response cache so backend
+// polls always hit warm. DB presence doesn't flip second-to-second, and
+// net.Connections on macOS shells out to lsof which spikes to 5-10s
+// under load — keeping the result longer is correct. The keep-warm
+// ticker in internal/health/StartBackground refreshes well under this
+// TTL so idle agents stay warm.
+const cacheTTL = 30 * time.Second
 
 var (
 	cacheMu   sync.Mutex
@@ -188,6 +190,16 @@ func ResetCache() {
 	cached = nil
 	cachedAt = time.Time{}
 	cacheMu.Unlock()
+}
+
+// Refresh forces a fresh probe and updates the cache, regardless of
+// current cache age. Used by the keep-warm ticker in
+// internal/health/StartBackground — calling Probe() during the cache's
+// fresh window would no-op, leaving the next /health stranded on a
+// cold cache once the TTL expired.
+func Refresh(ctx context.Context) {
+	ResetCache()
+	_ = Probe(ctx)
 }
 
 // dedupeDatabases collapses worker processes into one entry per server

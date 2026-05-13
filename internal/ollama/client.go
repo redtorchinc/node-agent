@@ -70,13 +70,29 @@ func NewClient(endpoint string) *Client {
 		Endpoint: endpoint,
 		HTTP:     &http.Client{Timeout: 2 * time.Second},
 		now:      time.Now,
-		cacheTTL: 5 * time.Second,
+		// 30s matches the case-manager's response cache so backend polls
+		// always hit warm. The keep-warm ticker in
+		// internal/health/StartBackground refreshes under this TTL so
+		// idle agents stay warm.
+		cacheTTL: 30 * time.Second,
 	}
 }
 
 // CacheTTL is the /api/ps response cache duration. Exposed so the platforms
 // adapter can surface it as probe_interval_s in /health.
 func (c *Client) CacheTTL() time.Duration { return c.cacheTTL }
+
+// Refresh clears the cached response and runs Probe immediately. Used by
+// the keep-warm ticker in internal/health/StartBackground so a fresh
+// /api/ps result lands in the cache before the next /health caller
+// races the (otherwise expired) cache.
+func (c *Client) Refresh(ctx context.Context) {
+	c.mu.Lock()
+	c.cached = nil
+	c.cachedAt = time.Time{}
+	c.mu.Unlock()
+	_ = c.Probe(ctx)
+}
 
 // Probe returns the current Ollama state. On error (including timeout) the
 // returned Info reports Up=false so the caller can fold it straight into

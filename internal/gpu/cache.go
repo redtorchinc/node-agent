@@ -51,3 +51,20 @@ func (c *CachedProbe) Probe(ctx context.Context) ([]GPU, error) {
 	c.at = time.Now()
 	return append([]GPU(nil), gpus...), nil
 }
+
+// Refresh forces a fresh probe regardless of cache state. Used by the
+// keep-warm tickers in internal/health/StartBackground so the cache is
+// always populated when /health asks for it — otherwise the ticker
+// hitting Probe() during the cache's fresh window would no-op, leaving
+// the next request stranded on a cold cache once the TTL expired.
+func (c *CachedProbe) Refresh(ctx context.Context) error {
+	gpus, err := c.inner.Probe(ctx)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.last = gpus
+	c.at = time.Now()
+	c.mu.Unlock()
+	return nil
+}

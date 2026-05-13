@@ -37,6 +37,14 @@ func New(entry config.PlatformEntry) *Detector {
 // Name returns "ollama".
 func (d *Detector) Name() string { return "ollama" }
 
+// Refresh clears the underlying legacy.Client cache and runs Probe.
+// Used by the keep-warm ticker in internal/health/StartBackground so
+// /health readers always hit a populated cache rather than priming it
+// themselves on the hot path.
+func (d *Detector) Refresh(ctx context.Context) {
+	d.client.Refresh(ctx)
+}
+
 // Probe converts the underlying ollama.Info into a platforms.Report. When
 // the platform is configured `enabled: false` returns an empty Report
 // with Up=false — the caller can still surface "configured but disabled".

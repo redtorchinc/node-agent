@@ -240,21 +240,16 @@ func (r *Reporter) StartBackground(ctx context.Context) {
 		_, _ = cpu.Percent(0, true)
 	}()
 
-	go func() {
-		wctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _ = r.GPU.Probe(wctx)
-	}()
-
-	// Pre-warm the databases probe in a detached goroutine. On macOS the
-	// gopsutil/net socket enumeration shells out to lsof and can take 3-5s
-	// on first call, which would otherwise stall the first /health
-	// response past the case-manager's 2s client deadline.
-	go func() {
-		wctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		defer cancel()
-		_ = databases.Probe(wctx)
-	}()
+	// Initial warmups + a periodic keep-warm ticker. The case-manager
+	// caches /health for 30s, so it polls every ~30s — which is exactly
+	// long enough for our 30s probe TTLs to expire between polls. The
+	// ticker keeps caches hot by refreshing every 25s, so backend polls
+	// always hit warm and pay only the ~10ms render cost. Stops when
+	// ctx is cancelled (agent shutdown).
+	go r.keepWarmGPU(ctx)
+	go r.keepWarmDatabases(ctx)
+	go r.keepWarmLegacyOllama(ctx)
+	go r.keepWarmPlatforms(ctx)
 
 	for _, sc := range r.Cfg.ServiceAllocators {
 		s := allocators.New(sc, r.Allocators)
@@ -379,6 +374,122 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	}
 
 	return rep, nil
+}
+
+// keepWarmInterval is the cadence at which background goroutines refresh
+// probe caches. Sized to sit comfortably under the underlying 30s cache
+// TTLs so the cached value is always populated; sized over the
+// case-manager's ~30s poll period so consecutive backend calls hit a
+// warm cache rather than racing the probe.
+const keepWarmInterval = 25 * time.Second
+
+// refresher is the contract that lets a keep-warm ticker force a fresh
+// underlying probe, bypassing TTL. Cache implementations satisfy it.
+type refresher interface {
+	Refresh(ctx context.Context)
+}
+
+// keepWarmGPU runs the GPU probe immediately and then every
+// keepWarmInterval. Uses CachedProbe.Refresh so each tick fires a real
+// scrape — calling Probe() during the cache's fresh window would
+// no-op, and the next /health after TTL expiry would still pay the
+// cold cost.
+func (r *Reporter) keepWarmGPU(ctx context.Context) {
+	refresh := func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		if c, ok := r.GPU.(*gpu.CachedProbe); ok {
+			_ = c.Refresh(wctx)
+		} else {
+			_, _ = r.GPU.Probe(wctx)
+		}
+	}
+	refresh()
+	t := time.NewTicker(keepWarmInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// keepWarmDatabases primes the databases probe (gopsutil/net + process
+// enumeration) and refreshes on the same cadence. On macOS the cold
+// socket enumeration shells to lsof and can spike past the /health
+// budget; this ticker keeps the cache populated so /health always
+// reads a fast path.
+func (r *Reporter) keepWarmDatabases(ctx context.Context) {
+	refresh := func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		databases.Refresh(wctx)
+	}
+	refresh()
+	t := time.NewTicker(keepWarmInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// keepWarmLegacyOllama refreshes the legacy /health.ollama field's cache.
+// Backed by the same legacy ollama.Client used by the platforms.ollama
+// adapter, so warming this also warms platforms.ollama.
+func (r *Reporter) keepWarmLegacyOllama(ctx context.Context) {
+	refresh := func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		r.Ollama.Refresh(wctx)
+	}
+	refresh()
+	t := time.NewTicker(keepWarmInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// keepWarmPlatforms refreshes every configured platform detector. The
+// detectors hold their own caches; this ticker calls Refresh on each
+// (or falls back to Probe for detectors that don't expose one) so the
+// caches stay populated for /health.
+func (r *Reporter) keepWarmPlatforms(ctx context.Context) {
+	refresh := func() {
+		for _, p := range r.platforms {
+			wctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if rf, ok := p.(refresher); ok {
+				rf.Refresh(wctx)
+			} else {
+				_ = p.Probe(wctx)
+			}
+			cancel()
+		}
+	}
+	refresh()
+	t := time.NewTicker(keepWarmInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
 }
 
 // applyUnifiedMemoryDerivation fills the VRAM ceiling and usage for

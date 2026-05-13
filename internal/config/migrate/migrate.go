@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -170,7 +171,10 @@ func ForceReset(path, defaultYAML string) (backupPath string, err error) {
 }
 
 // Banner returns a multi-line operator-facing message describing what
-// Migrate did. Empty string when nothing changed.
+// Migrate did. Empty string when nothing changed. The restart command
+// is OS-specific — systemd vs. launchd vs. Windows SCM have different
+// syntaxes, and we'd rather show one that actually works than make the
+// operator translate from a Linux command.
 func (r Result) Banner(existingPath string) string {
 	if r.AlreadyCurrent || r.NewConfigPath == "" {
 		return ""
@@ -186,9 +190,22 @@ func (r Result) Banner(existingPath string) string {
 	b.WriteString("  appended (commented): " + strings.Join(r.AddedKeys, ", ") + "\n\n")
 	b.WriteString("  review:  diff " + existingPath + " " + r.NewConfigPath + "\n")
 	b.WriteString("  apply:   mv " + r.NewConfigPath + " " + existingPath + "\n")
-	b.WriteString("           sudo systemctl restart rt-node-agent\n")
+	b.WriteString("           " + restartCommand() + "\n")
 	b.WriteString("\nThe agent will keep running with the existing config until you apply.\n")
 	return b.String()
+}
+
+// restartCommand returns the OS-appropriate "restart the service" line
+// for operator-facing prompts.
+func restartCommand() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "sudo launchctl kickstart -k system/com.redtorch.rt-node-agent"
+	case "windows":
+		return "Restart-Service rt-node-agent  (elevated PowerShell)"
+	default:
+		return "sudo systemctl restart rt-node-agent"
+	}
 }
 
 // readVersion returns the config_version value or 0 if absent.

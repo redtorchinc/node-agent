@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/redtorchinc/node-agent/internal/config"
 	"github.com/redtorchinc/node-agent/internal/config/migrate"
@@ -67,11 +68,35 @@ func brokenYAMLBanner(configPath, backup string, cause error) string {
   current: %s (now contains v0.2.0 defaults; edit and restart to apply changes)
 
   diff your old config:  diff %s %s
-  restart after editing: sudo systemctl restart rt-node-agent
+  restart after editing: %s
 
-The token file at /etc/rt-node-agent/token was not touched.
+The token file at %s was not touched.
 
-`, cause, backup, configPath, backup, configPath)
+`, cause, backup, configPath, backup, configPath, restartCommandForOS(), tokenPathForOS())
+}
+
+// restartCommandForOS returns the OS-appropriate restart command for
+// operator banners. Mirrors the migrate package's helper but lives here
+// so internal/service doesn't import internal/config/migrate just for a
+// string.
+func restartCommandForOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "sudo launchctl kickstart -k system/com.redtorch.rt-node-agent"
+	case "windows":
+		return "Restart-Service rt-node-agent  (elevated PowerShell)"
+	default:
+		return "sudo systemctl restart rt-node-agent"
+	}
+}
+
+// tokenPathForOS returns the OS-default token-file path. Linux and macOS
+// share /etc/rt-node-agent/token; Windows uses %ProgramData%.
+func tokenPathForOS() string {
+	if runtime.GOOS == "windows" {
+		return `%ProgramData%\rt-node-agent\token`
+	}
+	return "/etc/rt-node-agent/token"
 }
 
 // generateToken returns a 64-char hex-encoded 32-byte random token — the same

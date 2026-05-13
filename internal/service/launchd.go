@@ -79,9 +79,17 @@ func install() error {
 	// where the firewall isn't in use.
 	allowFirewall(exe)
 
+	// Defensive `bootout`: if a prior version of the agent is already
+	// bootstrapped under our label, `bootstrap` fails with "Bootstrap
+	// failed: 5: Input/output error" (EIO). Tearing it down first makes
+	// re-install idempotent. We discard stderr because a non-loaded
+	// label produces a confusing "Boot-out failed: 113: Could not find
+	// specified service" — expected on a fresh install.
+	_ = runLaunchctlQuiet("bootout", "system/"+launchdLabel)
+
 	// Bootstrap loads + starts in one step on modern macOS.
 	if err := runLaunchctl("bootstrap", "system", launchdPlist); err != nil {
-		return err
+		return fmt.Errorf("launchctl bootstrap: %w (try: sudo launchctl bootout system/%s && sudo rt-node-agent install)", err, launchdLabel)
 	}
 	_ = runLaunchctl("enable", "system/"+launchdLabel)
 	fmt.Println("rt-node-agent installed and started (launchd)")
@@ -176,4 +184,12 @@ func runLaunchctl(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// runLaunchctlQuiet runs launchctl with stderr discarded. Used for
+// defensive cleanup calls (bootout-before-bootstrap) where a "service
+// not found" failure is expected on a fresh install and would otherwise
+// clutter the install output.
+func runLaunchctlQuiet(args ...string) error {
+	return exec.Command("launchctl", args...).Run()
 }

@@ -7,9 +7,13 @@ yourself via [ARCHITECTURE.md](ARCHITECTURE.md) before editing anything.
 
 **v0.2.x shipped.** The agent is feature-complete for the inference plane
 + allowlisted service control + training-mode coordination + RDMA fabric
-visibility. v0.2.2 adds unified-memory NVIDIA (GB10 / Grace-Blackwell)
+visibility. v0.2.2 added unified-memory NVIDIA (GB10 / Grace-Blackwell)
 detection, the `platforms.ollama.enabled: false` vLLM-only opt-out, and
-self-describing `probe_interval_s` / `stale` on `platforms.*`.
+self-describing `probe_interval_s` / `stale` on `platforms.*`. v0.2.3
+adds raw swap counters + PSI gauges, `top_swap_processes[]`,
+auto-detected `databases[]` (20 fingerprints), and auto-detected
+`storage[]` (ZFS / NFS / CIFS / Ceph / GlusterFS / Lustre). All v0.2.x
+additions are additive — no config, no breaking changes.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [V0_2_0_PLAN.md](V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

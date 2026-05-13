@@ -43,11 +43,33 @@ fields they already know about.
     "swap_total_mb": 16000,
     "swap_used_mb": 0,
     "swap_used_pct": 0.0,
+    "swap_in_pages_total": 12389123,
+    "swap_out_pages_total": 89432019,
     "unified": false,
     "pressure": "normal",
+    "pressure_some_avg10": 0.12,
+    "pressure_some_avg60": 0.07,
+    "pressure_full_avg10": 0.00,
+    "pressure_full_avg60": 0.00,
     "huge_pages_total": 2048,
     "huge_pages_free": 0
   },
+
+  "top_swap_processes": [
+    {"pid": 2740534, "name": "VLLM::EngineCore", "swap_mb": 1843, "cmdline_head": "/opt/vllm/bin/python -m vllm.entrypoints.openai.api_server --model …"},
+    {"pid": 1234, "name": "systemd-journald", "swap_mb": 412, "cmdline_head": "/usr/lib/systemd/systemd-journald"}
+  ],
+
+  "databases": [
+    {"name": "postgres", "pid": 8123, "process_name": "postgres", "version": "15", "ports": [5432], "rss_mb": 412, "cpu_pct": 0.4, "uptime_s": 5234101},
+    {"name": "redis", "pid": 9012, "process_name": "redis-server", "ports": [6379], "rss_mb": 28}
+  ],
+
+  "storage": [
+    {"type": "zfs", "pool_name": "tank", "pool_health": "ONLINE"},
+    {"type": "zfs", "mountpoint": "/tank/models", "pool_name": "tank", "total_gb": 4096.0, "used_gb": 1834.2, "used_pct": 44.8},
+    {"type": "nfs4", "mountpoint": "/mnt/shared", "server": "10.0.0.5", "export": "/srv/shared", "nfs_version": "4.2", "total_gb": 10000.0, "used_gb": 6234.1, "used_pct": 62.3}
+  ],
 
   "gpus": [
     {
@@ -152,6 +174,20 @@ fields they already know about.
 
 Not every host can supply every field. The rules:
 
+- **Linux only:** `memory.swap_in/out_pages_total` (kernel `/proc/vmstat`
+  counters), `memory.pressure_some/full_avg10/60` (PSI), and
+  `top_swap_processes[]` (per-process `VmSwap`). macOS and Windows return
+  absent fields or an empty array — silence beats fabrication.
+- **`databases[]`** detects 20 well-known DB servers (Postgres, MySQL,
+  MariaDB, MongoDB, Redis, Memcached, Cassandra, ScyllaDB, Elasticsearch,
+  OpenSearch, Neo4j, InfluxDB, ClickHouse, CockroachDB, etcd, Qdrant,
+  Weaviate, Milvus, ChromaDB, DragonflyDB) by process name + cmdline.
+  No credentials, no config — surfaces presence, PID, listening ports,
+  RSS, CPU%, uptime, and best-effort version. Ports are absent when the
+  agent lacks permission to enumerate sockets for a PID it doesn't own.
+- **`storage[]`** auto-detects NAS / pooled storage: ZFS pools (via
+  `/proc/spl/kstat/zfs`), NFSv3/v4, CIFS/SMB, Ceph, GlusterFS, Lustre.
+  Capacity from `statfs`; NFS version from mount options.
 - **Unified-memory hosts (Apple Silicon, NVIDIA GB10 / Grace-Blackwell):**
   `gpus[].vram_unified: true` and `memory.unified: true`. The agent
   back-fills `vram_total_mb` from `memory.total_mb` and `vram_used_mb`

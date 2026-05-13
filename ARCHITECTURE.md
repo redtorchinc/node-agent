@@ -205,6 +205,10 @@ platform genuinely can't supply the data — **never** fabricate a zero.
 | CPU load avg | ✅ | ✅ | ❌ (no kernel load avg) |
 | CPU temps | ✅ (`/sys/class/hwmon`) | root-only via `powermetrics` | ✅ (WMI) |
 | GPU VRAM | ✅ (`nvidia-smi`) | ✅ (unified — derived from `memory.total_mb`; `gpus[].vram_unified: true`, `memory.unified: true`) | ✅ |
+| Swap counters (`pswpin`/`pswpout`), PSI raw gauges | ✅ (`/proc/vmstat`, `/proc/pressure/memory`) | ❌ | ❌ |
+| `top_swap_processes[]` | ✅ (`/proc/<pid>/status:VmSwap`) | ❌ | ❌ |
+| `databases[]` (Postgres/MySQL/Mongo/Redis/Neo4j/Chroma/…20 fingerprints) | ✅ | ✅ (process-only, no kstat) | ✅ |
+| `storage[]` (ZFS / NFS / CIFS / Ceph / GlusterFS / Lustre) | ✅ (`/proc/spl/kstat/zfs`, `/proc/self/mounts`) | partial (NFS / SMB via gopsutil) | partial |
 | GPU NVLink / MIG / ECC | ✅ | `null` | ✅ |
 | Per-process VRAM | ✅ | `null` (no public API) | ✅ |
 | Disk / network | ✅ | ✅ | ✅ |

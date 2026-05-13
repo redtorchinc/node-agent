@@ -4,52 +4,115 @@ package mem
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 )
 
-// probePressure reads /proc/pressure/memory. Available on kernels >= 4.20
-// with PSI enabled. Returns "" when the file is absent or unparseable
-// rather than synthesizing a value.
-func probePressure() string {
+// probePSI reads /proc/pressure/memory. Available on kernels >= 4.20 with
+// PSI enabled. Returns nil when the file is absent or unparseable rather
+// than synthesizing values — silence beats a fabricated "all clear."
+//
+// File shape:
+//
+//	some avg10=0.10 avg60=0.05 avg300=0.01 total=12345
+//	full avg10=0.00 avg60=0.00 avg300=0.00 total=42
+func probePSI() *PSI {
 	f, err := os.Open("/proc/pressure/memory")
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer f.Close()
-	// Two lines: "some" and "full", each with avg10/avg60/avg300/total.
-	// We classify "normal"/"some"/"full" by which avg10 is highest.
-	var someAvg10, fullAvg10 float64
-	sc := bufio.NewScanner(f)
+	return parsePSI(f)
+}
+
+// parsePSI is the pure parser, exposed for tests.
+func parsePSI(r io.Reader) *PSI {
+	p := &PSI{}
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		line := sc.Text()
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 4 {
 			continue
 		}
-		var avg10 float64
-		for _, p := range parts[1:] {
-			if strings.HasPrefix(p, "avg10=") {
-				avg10, _ = strconv.ParseFloat(strings.TrimPrefix(p, "avg10="), 64)
-				break
+		row := fields[0]
+		var avg10, avg60 float64
+		for _, kv := range fields[1:] {
+			switch {
+			case strings.HasPrefix(kv, "avg10="):
+				avg10, _ = strconv.ParseFloat(strings.TrimPrefix(kv, "avg10="), 64)
+			case strings.HasPrefix(kv, "avg60="):
+				avg60, _ = strconv.ParseFloat(strings.TrimPrefix(kv, "avg60="), 64)
 			}
 		}
-		switch parts[0] {
+		switch row {
 		case "some":
-			someAvg10 = avg10
+			p.SomeAvg10 = avg10
+			p.SomeAvg60 = avg60
 		case "full":
-			fullAvg10 = avg10
+			p.FullAvg10 = avg10
+			p.FullAvg60 = avg60
 		}
 	}
 	switch {
-	case fullAvg10 > 1.0:
-		return "full"
-	case someAvg10 > 1.0:
-		return "some"
+	case p.FullAvg10 > 1.0:
+		p.Classification = "full"
+	case p.SomeAvg10 > 1.0:
+		p.Classification = "some"
 	default:
-		return "normal"
+		p.Classification = "normal"
 	}
+	return p
+}
+
+// probePressure is retained for legacy callers. New code reads probePSI()
+// directly to get all four raw gauges plus the classification.
+func probePressure() string {
+	psi := probePSI()
+	if psi == nil {
+		return ""
+	}
+	return psi.Classification
+}
+
+// probeSwapCounters reads /proc/vmstat for pswpin / pswpout — the
+// cumulative count of pages swapped in / out since boot. Returns
+// (0,0,false) if /proc/vmstat is absent or neither counter is present.
+func probeSwapCounters() (uint64, uint64, bool) {
+	f, err := os.Open("/proc/vmstat")
+	if err != nil {
+		return 0, 0, false
+	}
+	defer f.Close()
+	return parseVmstatSwap(f)
+}
+
+// parseVmstatSwap is the pure parser. /proc/vmstat is one "key value" per
+// line; we only care about pswpin / pswpout.
+func parseVmstatSwap(r io.Reader) (uint64, uint64, bool) {
+	sc := bufio.NewScanner(r)
+	var pin, pout uint64
+	seenIn, seenOut := false, false
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "pswpin":
+			if n, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+				pin = n
+				seenIn = true
+			}
+		case "pswpout":
+			if n, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+				pout = n
+				seenOut = true
+			}
+		}
+	}
+	return pin, pout, seenIn && seenOut
 }
 
 // probeHugePages reads /proc/meminfo for HugePages_Total/HugePages_Free.

@@ -158,6 +158,14 @@ Response:
 
 `memory.unified: true` on unified-memory hosts (Apple Silicon, NVIDIA GB10 / Grace-Blackwell) — signals to the ranker that RAM pressure = GPU pressure. Per-GPU `gpus[].vram_unified: true` is set on the same hosts; on these the agent back-fills `vram_total_mb` from `memory.total_mb` and `vram_used_mb` from per-process accounting so `vram_used_pct` is a real percentage and `vram_over_*pct` reasons fire normally.
 
+### v0.2.3 additions (additive, forward-compat)
+
+- `memory.swap_in_pages_total` / `memory.swap_out_pages_total` — cumulative kernel counters from `/proc/vmstat` (Linux only). Use `rate()` across two scrapes for "pages swapped per second".
+- `memory.pressure_some_avg10` / `_avg60` / `pressure_full_avg10` / `_avg60` — raw PSI gauges. Backend can pick its own threshold instead of inheriting the agent's `"normal"`/`"some"`/`"full"` classification.
+- `top_swap_processes[]` — up to 10 processes ranked by `/proc/<pid>/status:VmSwap`, descending. Useful for "who's the noisy neighbour?" on a thrashing host.
+- `databases[]` — auto-detected DB servers (20 fingerprints incl. Postgres, MySQL, MongoDB, Redis, Neo4j, ChromaDB). Process-based detection, no config.
+- `storage[]` — auto-detected NAS / pooled storage (ZFS, NFS, CIFS, Ceph, GlusterFS, Lustre). Cap from `statfs`; ZFS pool health from `/proc/spl/kstat/zfs`.
+
 ### `degraded_reasons` contract
 
 The ranker consumes this directly. Ordered by severity; backend skips the node if any of the "hard" reasons are present.

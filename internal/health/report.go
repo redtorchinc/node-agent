@@ -20,6 +20,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/allocators"
 	"github.com/redtorchinc/node-agent/internal/buildinfo"
 	"github.com/redtorchinc/node-agent/internal/config"
+	"github.com/redtorchinc/node-agent/internal/databases"
 	"github.com/redtorchinc/node-agent/internal/gpu"
 	"github.com/redtorchinc/node-agent/internal/mem"
 	"github.com/redtorchinc/node-agent/internal/ollama"
@@ -29,6 +30,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/rdma"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/network"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/storage"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/timesync"
 )
 
@@ -49,6 +51,19 @@ type Report struct {
 	Disk    []disk.Info       `json:"disk"`
 	Network network.Info      `json:"network"`
 	TimeSync *timesync.Info   `json:"time_sync,omitempty"`
+
+	// Storage is v0.2.3: detected NAS / pooled storage (ZFS pools, NFS,
+	// CIFS, Ceph, GlusterFS, Lustre). Empty array when nothing matches.
+	Storage []storage.Info `json:"storage"`
+
+	// TopSwapProcesses is v0.2.3: top N processes ranked by VmSwap. Linux
+	// only (other platforms emit empty array). Capped at 10 entries.
+	TopSwapProcesses []mem.SwapProcess `json:"top_swap_processes"`
+
+	// Databases is v0.2.3: auto-detected database servers running on the
+	// node (Postgres, MySQL, MongoDB, Redis, Neo4j, Chroma, …). Empty
+	// array when nothing matches.
+	Databases []databases.Database `json:"databases"`
 
 	ServiceAllocs []allocators.Scraped `json:"service_allocators"`
 
@@ -195,6 +210,16 @@ func (r *Reporter) StartBackground(ctx context.Context) {
 	_, _ = r.GPU.Probe(wctx)
 	cancel()
 
+	// Pre-warm the databases probe in a detached goroutine. On macOS the
+	// gopsutil/net socket enumeration shells out to lsof and can take 3-5s
+	// on first call, which would otherwise stall the first /health
+	// response past the case-manager's 2s client deadline.
+	go func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		_ = databases.Probe(wctx)
+	}()
+
 	for _, sc := range r.Cfg.ServiceAllocators {
 		s := allocators.New(sc, r.Allocators)
 		// Wire only_when_mode through the mode reporter so the scrape loop
@@ -274,6 +299,18 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 		rep.Disk = []disk.Info{}
 	}
 	rep.Network = network.Probe()
+
+	rep.Storage = storage.Probe()
+	rep.TopSwapProcesses = mem.TopSwapProcesses(10)
+	if rep.TopSwapProcesses == nil {
+		rep.TopSwapProcesses = []mem.SwapProcess{}
+	}
+	dbCtx, dbCancel := context.WithTimeout(ctx, 2*time.Second)
+	rep.Databases = databases.Probe(dbCtx)
+	dbCancel()
+	if rep.Databases == nil {
+		rep.Databases = []databases.Database{}
+	}
 
 	if ts := timesync.Probe(ctx); ts != nil {
 		rep.TimeSync = ts

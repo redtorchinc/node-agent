@@ -22,8 +22,10 @@ func TestNFSVersionFromOpts(t *testing.T) {
 }
 
 func TestSplitColonPath(t *testing.T) {
-	srv, exp := splitColonPath("10.0.0.5:/srv/models")
-	if srv != "10.0.0.5" || exp != "/srv/models" {
+	// IPs in tests use RFC 5737 documentation ranges (TEST-NET-3 here) so
+	// nothing in the repo looks like a real fleet address.
+	srv, exp := splitColonPath("203.0.113.5:/srv/models")
+	if srv != "203.0.113.5" || exp != "/srv/models" {
 		t.Errorf("got (%q, %q)", srv, exp)
 	}
 	// IPv6 hostnames in /proc/self/mounts are kernel-rendered as bracketed

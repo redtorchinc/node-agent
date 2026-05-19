@@ -1,0 +1,56 @@
+name: codeql
+
+# CodeQL is GitHub's first-party static analyzer. Findings post to the
+# repo's Security → Code scanning tab. Runs on push to main, on PRs
+# against main, and on a Monday-morning schedule so newly-published
+# query updates pick up issues that previous code clean.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 03:17 UTC every Monday — randomised minute to avoid the GitHub-wide
+    # 00:00 thundering herd.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: initialise codeql
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Default + security-extended pulls in additional queries that
+          # focus on injection / unsafe API usage. security-and-quality
+          # adds maintainability rules; we leave those for golangci-lint
+          # in CI proper.
+          queries: security-extended
+
+      - name: build
+        uses: github/codeql-action/autobuild@v3
+
+      - name: analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

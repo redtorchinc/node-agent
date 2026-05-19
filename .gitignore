@@ -1,4 +1,4 @@
-# Binaries and build output
+# --- Build output ---
 /rt-node-agent
 /rt-node-agent.exe
 /bin/
@@ -9,61 +9,118 @@
 *.so
 *.dylib
 
-# Go test / coverage
+# Go tooling
 *.test
 *.out
 coverage.*
+coverage.txt
+profile.cov
+cpu.prof
+mem.prof
 /vendor/
 
-# Secrets — see CLAUDE.md §Public-repo hygiene
-# Never commit tokens, keys, or any /etc/rt-node-agent/token content
+# --- Secrets: see CLAUDE.md §Public-repo hygiene ---
+# This block is the safety rail, not the contract. The rule is: if it
+# would feel wrong to paste into a public Slack, add a pattern HERE
+# before creating the file. `git log -p --all` is also public — a
+# committed secret is compromised; rotate, don't rewrite.
+
+# Environment / token files
 .env
 .env.*
 !.env.example
-*.pem
-*.key
-*.pfx
-*.p12
 token
 token.txt
 *.token
 secrets/
+secrets.*
+
+# Private keys, certs, signatures (cosign/minisign/SSH/TLS/GPG)
+*.pem
+*.key
+*.pfx
+*.p12
+*.priv
+*.crt
+*.cer
+*.der
+*.csr
+*.jks
+*.keystore
+*.truststore
+*.gpg
+*.asc
+*.pgp
+cosign.key
+minisign.key
+*.minisig
+known_hosts
+authorized_keys
+id_rsa*
+id_ed25519*
+id_ecdsa*
+
+# Anywhere a real host might dump its agent-state into the working tree
 /etc/
 /var/
 
-# Release signing material (cosign/minisign private keys)
-*.priv
-cosign.key
-minisign.key
-
-# Local dev config that may contain real node URLs or tokens
+# --- Operator-owned config ---
+# config.local.* and the on-disk live config never belong in the repo.
 config.local.*
 /config.yaml
 !examples/config.yaml
 
-# Operator working files — produced by `config migrate` or hand-edits.
-# A *.new file represents an unreviewed config diff; not committable.
+# Migration intermediates. Both `.new` (legacy v0.2.0-v0.2.6 sidecar) and
+# `.bak` (v0.2.7+ in-place migration backup) live alongside the live
+# config and should never be committed.
 *.yaml.new
 *.yaml.bak
+*.yaml.broken-*
 config.yaml.new
+config.yaml.bak
 training_mode.json
+*.pid
 
-# Scratch markdown (anything starting with a space, or named scratch.*)
-# Keeps accidental operator notes out of commits.
+# --- Scratch files / operator notes ---
+# Leading-space markdown files and SCRATCH.*/scratch.* are explicitly
+# excluded so accidental operator notes don't slip in.
 [ ]*.md
 scratch.*
 SCRATCH.*
+NOTES.*
+TODO.*.md
+*.todo.md
 
-# OS / editor
+# --- OS / editor ---
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
 *.swp
+*.swo
 *~
+*.orig
+*.rej
+.fleet/
+.zed/
 
-# Claude Code local settings (may contain user-specific paths/tokens).
-# Note: CLAUDE.md itself IS committed — it documents the public contract
-# and is content-equivalent to CONTRIBUTING.md. Nothing sensitive there.
+# --- Python tooling (if anyone wires up local scripts) ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Claude Code agent state ---
+# CLAUDE.md is committed (it's the public contract for AI collaborators,
+# content-equivalent to CONTRIBUTING.md). Everything ELSE under
+# .claude/ is local agent state with user-specific paths/transcripts.
 .claude/settings.local.json
+.claude/memory/
+.claude/projects/
+.claude/transcripts/
 .claude/*.local.*

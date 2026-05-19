@@ -68,7 +68,7 @@ fields they already know about.
   "storage": [
     {"type": "zfs", "pool_name": "tank", "pool_health": "ONLINE"},
     {"type": "zfs", "mountpoint": "/tank/models", "pool_name": "tank", "total_gb": 4096.0, "used_gb": 1834.2, "used_pct": 44.8},
-    {"type": "nfs4", "mountpoint": "/mnt/shared", "server": "10.0.0.5", "export": "/srv/shared", "nfs_version": "4.2", "total_gb": 10000.0, "used_gb": 6234.1, "used_pct": 62.3}
+    {"type": "nfs4", "mountpoint": "/mnt/shared", "server": "203.0.113.5", "export": "/srv/shared", "nfs_version": "4.2", "total_gb": 10000.0, "used_gb": 6234.1, "used_pct": 62.3}
   ],
 
   "gpus": [
@@ -104,9 +104,9 @@ fields they already know about.
   ],
 
   "network": {
-    "hostname_fqdn": "dgx-01.lan.internal",
+    "hostname_fqdn": "dgx-01.example.com",
     "interfaces": [
-      {"name": "eno1", "up": true, "mtu": 1500, "ipv4": ["192.168.50.122"], "rx_bytes_total": 12345678}
+      {"name": "eno1", "up": true, "mtu": 1500, "ipv4": ["198.51.100.122"], "rx_bytes_total": 12345678}
     ]
   },
 

@@ -26,7 +26,7 @@ type Info struct {
 	Mountpoint string `json:"mountpoint,omitempty"`
 
 	// Server is the remote endpoint (NFS/CIFS) parsed from the device
-	// field (e.g. "10.0.0.5" for "10.0.0.5:/export").
+	// field (e.g. "203.0.113.5" for "203.0.113.5:/export").
 	Server string `json:"server,omitempty"`
 
 	// Export is the server-side path (NFS) or share name (CIFS).

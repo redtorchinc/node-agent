@@ -559,17 +559,17 @@ Build tags partition the implementation:
 
 ```json
 "network": {
-  "hostname_fqdn": "dgx-01.lan.internal",
+  "hostname_fqdn": "dgx-01.example.com",
   "interfaces": [
-    {"name": "eno1", "up": true, "speed_mbps": 1000, "mtu": 1500, "ipv4": ["192.168.50.122"], "rx_mb_per_s": 0.4, "tx_mb_per_s": 0.1, "rx_errors_total": 0, "tx_errors_total": 0},
-    {"name": "rocep1s0f0", "up": true, "speed_mbps": 200000, "mtu": 4200, "ipv4": ["10.10.1.1"], "rx_mb_per_s": 0.0, "tx_mb_per_s": 0.0}
+    {"name": "eno1", "up": true, "speed_mbps": 1000, "mtu": 1500, "ipv4": ["198.51.100.122"], "rx_mb_per_s": 0.4, "tx_mb_per_s": 0.1, "rx_errors_total": 0, "tx_errors_total": 0},
+    {"name": "rocep1s0f0", "up": true, "speed_mbps": 200000, "mtu": 4200, "ipv4": ["203.0.113.1"], "rx_mb_per_s": 0.0, "tx_mb_per_s": 0.0}
   ]
 }
 ```
 
 - `gopsutil/net.Interfaces()` + `IOCounters()`.
 - Rates over 60s window like elsewhere.
-- Public-repo hygiene: the hostname/IP example uses the SPEC's already-public examples; nothing new committed.
+- Public-repo hygiene: example IPs are from RFC 5737 documentation ranges (TEST-NET-2 / TEST-NET-3) and example hostname from RFC 2606 `example.com`. Nothing here maps to a real fleet host.
 
 #### A4.6 Time sync
 
@@ -768,7 +768,8 @@ docs/
 
 Before every commit on this branch:
 
-- No real hostnames (use `spark-A1`, `dgx-01`, `ctrlone-…` from SPEC.md only).
+- No real hostnames (use `spark-A1`, `dgx-01`, `ctrlone-…` from SPEC.md only); when a domain is needed use `example.com` (RFC 2606).
+- No real IPs in examples or tests — use RFC 5737 ranges `192.0.2.0/24` (TEST-NET-1), `198.51.100.0/24` (TEST-NET-2), or `203.0.113.0/24` (TEST-NET-3).
 - No real tokens in fixtures — generate with `crypto/rand` in test setup.
 - No internal Linear/Slack/PR URLs in code or markdown.
 - New `examples/config.yaml` is the canonical illustrative config and is committed; real `/etc/rt-node-agent/config.yaml` is not.

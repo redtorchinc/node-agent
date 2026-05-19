@@ -249,7 +249,7 @@ Deliberately not in v1. Restarting ollama mid-inference loses user work. Require
 
 1. New file `backend/app/services/node_health.py`:
    - `async def get_node_health(base_url: str) -> NodeHealth | None` with a 2s timeout and 30s cache.
-   - Converts agent URL from ollama URL: `http://192.168.50.122:11434` → `http://192.168.50.122:11435`.
+   - Converts agent URL from ollama URL: `http://198.51.100.122:11434` → `http://198.51.100.122:11435` (example IP from RFC 5737 TEST-NET-2).
    - Agent port configurable via `config/ollama.yaml` if someone runs a non-default.
 
 2. `ollama_service.rank_nodes()` gains an optional async variant that consults `get_node_health` before returning. Existing sync callers keep working; the dispatcher uses the async variant.

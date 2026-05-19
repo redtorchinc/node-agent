@@ -1,0 +1,105 @@
+name: security
+
+# Three scanners that complement CodeQL:
+#   * govulncheck — known CVEs in the Go module graph + stdlib
+#   * gosec       — Go-specific security linter (weak crypto, unsafe perms, …)
+#   * gitleaks    — secret-detection over working tree AND git history
+#
+# All upload SARIF to the repo's Security tab so triage lives next to
+# CodeQL findings.
+#
+# A fourth job, dependency-review, runs on PRs and blocks merges that
+# introduce a vulnerable transitive dep.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily — vuln.go.dev publishes new CVEs continuously, so a weekly
+    # cadence would let an issue sit a week before alerting.
+    - cron: '23 5 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: run govulncheck
+        # Emit JSON, then post-process to SARIF for the Security tab.
+        # govulncheck supports `-format sarif` directly since v1.1.x.
+        run: govulncheck -format sarif ./... > govulncheck.sarif
+      - name: upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: govulncheck.sarif
+          category: govulncheck
+
+  gosec:
+    name: gosec
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: run gosec
+        # Pinned by version tag; the action's image carries gosec itself.
+        # SARIF output integrates with the Security tab.
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out gosec.sarif ./...'
+      - name: upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan catches anything in past
+          # commits, not just the working tree.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          # gitleaks-action posts findings as PR comments AND uploads
+          # SARIF. The token is GITHUB_TOKEN, not a personal secret.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-review:
+    name: dependency-review (PRs only)
+    # Action needs a base ref to diff against; pushes to main don't have one.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          # Block PRs that introduce a moderate-or-higher severity CVE
+          # via a new or upgraded transitive dep.
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure

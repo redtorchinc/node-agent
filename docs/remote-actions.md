@@ -65,7 +65,7 @@ beyond what that endpoint already permits.
 Every mutating call logs structured fields via slog:
 
 ```
-INFO service action ok unit=rt-vllm-qwen3.service action=start active=active sub=running took_ms=312 remote=192.168.50.10:54421
+INFO service action ok unit=rt-vllm-qwen3.service action=start active=active sub=running took_ms=312 remote=198.51.100.10:54421
 WARN service action denied or failed unit=docker.service action=stop code=403 err="unit not in allowlist" remote=...
 ```
 

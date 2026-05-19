@@ -1,0 +1,50 @@
+version: 2
+updates:
+  # Go module updates. The agent's dependency tree is deliberately small
+  # (gopsutil, golang.org/x/sys, yaml.v3); weekly is plenty.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    # Group all patch/minor bumps into one PR per ecosystem to keep
+    # review burden low; majors land as their own PRs because they
+    # might break the build.
+    groups:
+      go-deps:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: 'deps(go)'
+      include: scope
+
+  # GitHub Actions used in our workflows (release.yml, codeql.yml,
+  # security.yml). Dependabot pins to the latest non-vulnerable
+  # version. Keeps actions/checkout, actions/setup-go etc. current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      gh-actions:
+        update-types:
+          - patch
+          - minor
+          - major
+    commit-message:
+      prefix: 'deps(actions)'
+      include: scope

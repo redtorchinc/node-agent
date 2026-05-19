@@ -12,7 +12,7 @@ const v1Existing = `# operator notes: this is the prod inference box
 port: 19999
 bind: 127.0.0.1
 token_file: /etc/rt-node-agent/token
-ollama_endpoint: http://192.168.0.10:11434
+ollama_endpoint: http://198.51.100.10:11434
 metrics_enabled: true
 
 service_allocators:
@@ -99,7 +99,7 @@ func TestMigrate_v1ToV2_MergesInPlace(t *testing.T) {
 	if !strings.Contains(live, "port: 19999") {
 		t.Errorf("merged file lost operator's port: %s", live)
 	}
-	if !strings.Contains(live, "192.168.0.10") {
+	if !strings.Contains(live, "198.51.100.10") {
 		t.Errorf("merged file lost operator's ollama_endpoint: %s", live)
 	}
 	if !strings.Contains(live, "metrics_enabled: true") {

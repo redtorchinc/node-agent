@@ -118,7 +118,7 @@ func buildGenericNetEntry(m mountEntry, kind string) Info {
 		Type:       kind,
 		Mountpoint: m.mountpoint,
 	}
-	// Best-effort server extraction (Ceph device: "10.0.0.1:6789:/")
+	// Best-effort server extraction (Ceph device: "203.0.113.1:6789:/")
 	if i := strings.Index(m.device, ":"); i > 0 {
 		info.Server = m.device[:i]
 	}

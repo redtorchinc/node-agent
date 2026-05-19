@@ -40,15 +40,13 @@ jobs:
       - name: install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: run govulncheck
-        # Emit JSON, then post-process to SARIF for the Security tab.
-        # govulncheck supports `-format sarif` directly since v1.1.x.
-        run: govulncheck -format sarif ./... > govulncheck.sarif
-      - name: upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: govulncheck.sarif
-          category: govulncheck
+        # Plain-text output for the run log, exit non-zero on finding.
+        # We deliberately do NOT emit SARIF: govulncheck's SARIF output
+        # has duplicate strings in rule `properties.tags` which the
+        # CodeQL upload validator rejects per the spec
+        # (golang/go#67586). The vuln database is small enough that
+        # operators can read findings directly from the action log.
+        run: govulncheck ./...
 
   gosec:
     name: gosec
@@ -83,11 +81,28 @@ jobs:
           # Full history so the secret scan catches anything in past
           # commits, not just the working tree.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          # gitleaks-action posts findings as PR comments AND uploads
-          # SARIF. The token is GITHUB_TOKEN, not a personal secret.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Run the gitleaks CLI directly. The action wrapper
+      # (gitleaks/gitleaks-action) moved to a paid licence for
+      # organisation-owned repos in 2024; the underlying binary is
+      # still MIT-licensed and works the same way. Install + invoke
+      # it ourselves.
+      - name: install gitleaks
+        run: |
+          version="8.21.2"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: scan working tree
+        run: gitleaks detect --source . --no-banner --redact --verbose --report-format sarif --report-path gitleaks.sarif
+
+      - name: upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
 
   dependency-review:
     name: dependency-review (PRs only)

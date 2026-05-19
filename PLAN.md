@@ -3,7 +3,7 @@
 **Status:** v0.1.0 shipped. All milestones M0–M12 below are complete. This
 file is kept for historical context — the decisions made during the v0.1
 build still apply (single static binary, no CGO, stdlib router, etc.). For
-current v0.2.0 work, see [V0_2_0_PLAN.md](V0_2_0_PLAN.md). For the
+current v0.2.0 work, see [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md). For the
 file-by-file project map, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
@@ -42,7 +42,7 @@ risks) is preserved in git history; see commits up to and including
 
 ## 3. v0.2.0 plan
 
-See [V0_2_0_PLAN.md](V0_2_0_PLAN.md). Status: shipped. New surface added:
+See [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md). Status: shipped. New surface added:
 
 - Versioned config schema + `rt-node-agent config migrate` (comment-preserving YAML upgrade)
 - `internal/platforms/` package: Ollama adapter + vLLM probe with Prometheus metrics scraping

@@ -20,7 +20,7 @@ vllm_down opt-in (no longer fires under `auto`), and splits the
 degraded boolean into `degraded_hard` / `degraded_soft`. All v0.2.x
 additions are additive — no config, no breaking changes.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
-change there is a cross-repo break). [V0_2_0_PLAN.md](V0_2_0_PLAN.md)
+change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0
 build plan (now complete).
 

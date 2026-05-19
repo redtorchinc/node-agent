@@ -34,7 +34,7 @@ same trusted LAN as the case-manager.
 | [spec/SPEC.md](spec/SPEC.md) | **Authoritative wire contract.** `/health` JSON shape, `degraded_reasons` vocabulary, endpoint paths. Cross-repo contract with the case-manager backend; changes here are breaking. |
 | [spec/NODE_AGENT_TRAINING_EXTENSIONS.md](spec/NODE_AGENT_TRAINING_EXTENSIONS.md) | v0.2.0 training-plane spec: RDMA fields, mode state machine, `POST /actions/training-mode`. |
 | [PLAN.md](PLAN.md) | v0.1.0 build plan, historical. All milestones M0–M12 complete. |
-| [V0_2_0_PLAN.md](V0_2_0_PLAN.md) | v0.2.0 design. Source-of-truth for the additions in the current release. |
+| [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md) | v0.2.0 design. Source-of-truth for the additions in the current release. |
 | [CLAUDE.md](CLAUDE.md) | Architectural constants + public-repo hygiene. Read before adding files or committing. |
 | [docs/](docs/) | Operator-facing how-to (install, config, per-endpoint reference, troubleshooting). |
 

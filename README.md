@@ -7,7 +7,7 @@ units.
 
 **Authoritative docs:** [spec/SPEC.md](./spec/SPEC.md) (wire contract) ·
 [ARCHITECTURE.md](./ARCHITECTURE.md) (project map) ·
-[V0_2_0_PLAN.md](./V0_2_0_PLAN.md) (v0.2.0 design) ·
+[spec/V0_2_0_PLAN.md](./spec/V0_2_0_PLAN.md) (v0.2.0 design) ·
 [docs/](./docs/) (operator reference).
 
 ## Install

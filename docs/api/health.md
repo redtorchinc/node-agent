@@ -110,7 +110,25 @@ fields they already know about.
     ]
   },
 
-  "time_sync": {"source": "chrony", "synced": true, "skew_ms": 0.42, "stratum": 3},
+  "time_sync": {
+    "now_unix_ns": 1748227201123456789,
+    "now_iso": "2026-05-22T14:00:01.123456789Z",
+    "tz_name": "UTC",
+    "tz_offset_s": 0,
+    "source": "chrony",
+    "synced": true,
+    "skew_ms": 0.42,
+    "stratum": 3,
+    "last_update_s": 12,
+    "server": {
+      "host": "time.cloudflare.com",
+      "offset_ms": 1.23,
+      "rtt_ms": 14.5,
+      "stratum": 3,
+      "last_probe_age_s": 7,
+      "probe_interval_s": 60
+    }
+  },
 
   "service_allocators": [
     {"name": "gliner2-service", "scrape_ok": true, "allocated_mb": 1864.8, "reserved_mb": 1890.0, ...}
@@ -217,7 +235,10 @@ Not every host can supply every field. The rules:
   `0.0`, and `vram_over_*pct` reasons fire normally. Apple Silicon
   `gpus[].temp_c` / `power_w` are still `0` unless the agent runs as root.
 - **Windows:** `cpu.load_*` is `0` (no kernel load average). `time_sync`
-  is omitted (no `w32tm` parser in v0.2).
+  is always emitted — `now_unix_ns` / `tz_*` / agent-driven `server.*`
+  populate cross-platform; only the OS-sync subset (`source`, `synced`,
+  `skew_ms`, `stratum`, `last_update_s`) is absent on Windows (no `w32tm`
+  parser in v0.2).
 - **macOS / Windows:** `rdma` is always omitted.
 - **Any platform without a probe path** (e.g. CPU temps without
   `/sys/class/hwmon` on Linux) leaves the field absent rather than emitting
@@ -230,7 +251,8 @@ See [config.md](../config.md) and [spec/SPEC.md](../../spec/SPEC.md) for field s
 | Condition | Omitted |
 |---|---|
 | No RDMA hardware | `rdma` |
-| No NTP probe possible (e.g. macOS without `sntp`) | `time_sync` |
+| `timesync.server: ""` in config | `time_sync.server` (wall-clock + OS-sync fields still emit) |
+| No OS sync daemon detected | `time_sync.source` / `skew_ms` / `stratum` / `last_update_s` (wall-clock + agent-driven `server.*` still emit) |
 | `training_mode` not engaged | `training` |
 | Platform `enabled: false` | corresponding `platforms.{name}` *kept but `up: false`* |
 | Per-field absence | `omitempty` JSON tag on the field |

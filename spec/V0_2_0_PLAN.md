@@ -575,18 +575,34 @@ Build tags partition the implementation:
 
 ```json
 "time_sync": {
+  "now_unix_ns": 1748227201123456789,
+  "now_iso": "2026-05-22T14:00:01.123456789Z",
+  "tz_name": "UTC",
+  "tz_offset_s": 0,
   "source": "chrony",
   "synced": true,
   "skew_ms": 0.42,
   "stratum": 3,
-  "last_update_s": 12
+  "last_update_s": 12,
+  "server": {
+    "host": "time.cloudflare.com",
+    "offset_ms": 1.23,
+    "rtt_ms": 14.5,
+    "stratum": 3,
+    "last_probe_age_s": 7,
+    "probe_interval_s": 60
+  }
 }
 ```
 
-- Linux: `chronyc tracking` parsed, fallback `timedatectl show-timesync`.
-- macOS: `sntp -t 1 time.apple.com` if reachable, else `null`.
-- Windows: `w32tm /query /status` parsed.
-- `null` if no NTP service is running (don't punish — informational).
+- `now_unix_ns` / `now_iso` / `tz_*` are always populated. The case-manager subtracts `now_unix_ns` from its own clock to compute per-node offset for display and cross-node ranking. This is independent of every NTP source — it's just "what does this node think the time is, right now."
+- OS sync daemon subset (`source` / `synced` / `skew_ms` / `stratum` / `last_update_s`):
+  - Linux: `chronyc tracking` parsed, fallback `timedatectl show-timesync`.
+  - macOS: `sntp -t 1 time.apple.com` if reachable, else absent.
+  - Windows: `w32tm /query /status` parsed (deferred to v0.3).
+  - Absent if no OS sync service is detected (don't punish — informational).
+- `server` subblock is the agent's own NTP v4 probe against `timesync.server` (config, default `time.cloudflare.com`). 60s background cadence. Sign convention: `offset_ms` = local - server (positive = local ahead). Absent entirely when operator sets `timesync.server: ""`.
+- Two independent soft `degraded_reasons` fire from this surface: `clock_skew_high` from `skew_ms` (the OS daemon view) and `clock_offset_high` from `server.offset_ms` (the agent's own probe). Both can fire together — the case-manager can choose which it trusts more.
 
 #### A4.7 `GET /capabilities`
 
@@ -623,7 +639,8 @@ The `system_metrics_fields_supported` list is what makes the per-architecture co
 |---|---|---|
 | `disk_over_90pct` | soft | any monitored disk > 90% used |
 | `disk_over_98pct` | hard | any monitored disk > 98% used |
-| `clock_skew_high` | soft | `abs(skew_ms) > 100` (any platform where time_sync available) |
+| `clock_skew_high` | soft | `abs(time_sync.skew_ms) > 100` (OS sync daemon view; silent on platforms without one) |
+| `clock_offset_high` | soft | `abs(time_sync.server.offset_ms) > 100` (agent's own NTP probe; silent when `timesync.server: ""` or no probe has succeeded yet) |
 | `cpu_thermal_throttling` | soft | `cpu.throttled == true` |
 | `gpu_thermal_throttling` | soft | any `gpu.throttle_reasons` contains `HW_THERMAL_SLOWDOWN` or `SW_THERMAL_SLOWDOWN` |
 | `gpu_power_throttling` | soft | any `gpu.throttle_reasons` contains `HW_POWER_BRAKE_SLOWDOWN` or `SW_POWER_CAP` |

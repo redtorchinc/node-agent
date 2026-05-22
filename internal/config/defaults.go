@@ -110,4 +110,19 @@ service_allocators:
 #   pfc_storm_threshold_rx_rate: 1000
 #   pfc_storm_window_s: 30
 #   errors_growing_window_s: 60
+
+# Time-sync probe. The agent always exposes the node's own wall-clock at
+# /health.time_sync.{now_unix_ns,now_iso,tz_*} so the case-manager can
+# compute cross-node offsets. When ` + "`timesync.server`" + ` is set (the default),
+# the agent additionally runs its own NTP query against that server every
+# 60s and surfaces local-vs-server offset under
+# /health.time_sync.server.{offset_ms,rtt_ms,stratum,error}. The new soft
+# degraded reason ` + "`clock_offset_high`" + ` fires when |offset_ms| > 100.
+#
+# Set to the empty string to disable the agent-driven probe entirely
+# (the wall-clock + OS-sync fields still populate). The default points at
+# Cloudflare's public anycast NTP service — accurate, NTS-capable, no
+# leap-second smearing.
+timesync:
+  server: time.cloudflare.com
 `

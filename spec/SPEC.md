@@ -166,6 +166,37 @@ Response:
 - `databases[]` — auto-detected DB servers (20 fingerprints incl. Postgres, MySQL, MongoDB, Redis, Neo4j, ChromaDB). Process-based detection, no config.
 - `storage[]` — auto-detected NAS / pooled storage (ZFS, NFS, CIFS, Ceph, GlusterFS, Lustre). Cap from `statfs`; ZFS pool health from `/proc/spl/kstat/zfs`.
 
+### Cross-node time alignment (v0.2.x time_sync extension)
+
+```json
+"time_sync": {
+  "now_unix_ns": 1748227201123456789,
+  "now_iso": "2026-05-22T14:00:01.123456789Z",
+  "tz_name": "UTC",
+  "tz_offset_s": 0,
+  "source": "chrony",
+  "synced": true,
+  "skew_ms": 0.42,
+  "stratum": 3,
+  "last_update_s": 12,
+  "server": {
+    "host": "time.cloudflare.com",
+    "offset_ms": 1.23,
+    "rtt_ms": 14.5,
+    "stratum": 3,
+    "last_probe_age_s": 7,
+    "probe_interval_s": 60
+  }
+}
+```
+
+- `now_unix_ns` is the node's wall clock at /health composition time, in nanoseconds since the Unix epoch. Always populated. **Primary cross-node comparison primitive:** the case-manager subtracts this from its own clock to compute a per-node offset (corrected by RTT/2 if it needs sub-ms precision).
+- `now_iso` is the same value rendered as RFC3339Nano UTC. Redundant with `now_unix_ns` but cheaper for log dashboards.
+- `tz_name` / `tz_offset_s` describe the node's configured local time zone.
+- `source` / `synced` / `skew_ms` / `stratum` / `last_update_s` come from the local OS sync daemon (chrony or systemd-timesyncd on Linux, sntp on darwin). Absent on Windows (no `w32tm` parser in v0.2.x) and on Linux hosts without either daemon.
+- `server` is the agent's own NTP probe against `timesync.server` from config (default `time.cloudflare.com`). 60s background cadence. `offset_ms` is **LOCAL minus SERVER** (positive = local is ahead of the reference). `error` populates instead when the last probe failed. Omitted entirely when `timesync.server: ""` in config.
+- `clock_skew_high` and `clock_offset_high` are two independent soft degraded reasons — the former reads the OS daemon's view, the latter reads the agent's own probe. Both can fire together when the local daemon and the external reference disagree.
+
 ### `degraded_reasons` contract
 
 The ranker consumes this directly. Ordered by severity; backend skips the node if any of the "hard" reasons are present.

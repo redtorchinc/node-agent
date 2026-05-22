@@ -32,6 +32,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/network"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/storage"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/thermal"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/timesync"
 )
 
@@ -182,6 +183,8 @@ type Reporter struct {
 	GPU        gpu.Probe
 	Ollama     *ollama.Client
 	Allocators *allocators.Store
+	Thermal    *thermal.Probe
+	TimeServer *timesync.ServerProbe
 
 	platforms []platforms.Platform // detectors in stable order
 	services  ServicesReporter
@@ -199,8 +202,12 @@ func NewReporter(cfg config.Config) (*Reporter, error) {
 		GPU:        gpu.Select(),
 		Ollama:     ollama.NewClient(cfg.Platforms.Ollama.Endpoint),
 		Allocators: allocators.NewStore(),
+		Thermal:    thermal.New(),
 		start:      time.Now(),
 		now:        time.Now,
+	}
+	if cfg.TimeSync.Server != "" {
+		r.TimeServer = timesync.NewServerProbe(cfg.TimeSync.Server)
 	}
 	r.platforms = []platforms.Platform{
 		pollama.New(cfg.Platforms.Ollama),
@@ -250,6 +257,12 @@ func (r *Reporter) StartBackground(ctx context.Context) {
 	go r.keepWarmDatabases(ctx)
 	go r.keepWarmLegacyOllama(ctx)
 	go r.keepWarmPlatforms(ctx)
+	if r.Thermal != nil {
+		r.Thermal.Start(ctx)
+	}
+	if r.TimeServer != nil {
+		r.TimeServer.Start(ctx)
+	}
 
 	for _, sc := range r.Cfg.ServiceAllocators {
 		s := allocators.New(sc, r.Allocators)
@@ -305,6 +318,10 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 
 	applyUnifiedMemoryDerivation(&rep)
 
+	if r.Thermal != nil {
+		applyThermalOverlay(&rep, r.Thermal.Snapshot())
+	}
+
 	rep.ServiceAllocs = r.Allocators.Snapshot()
 	if rep.ServiceAllocs == nil {
 		rep.ServiceAllocs = []allocators.Scraped{}
@@ -343,9 +360,12 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 		rep.Databases = []databases.Database{}
 	}
 
-	if ts := timesync.Probe(ctx); ts != nil {
-		rep.TimeSync = ts
-	}
+	// time_sync is now always populated: wall-clock (NowUnixNS, NowISO,
+	// TZ) is cheap and the case-manager uses it to compute cross-node
+	// offsets. The OS sync daemon fields and the agent-driven server
+	// probe both layer in via Compose; either can be silent without
+	// suppressing the others.
+	rep.TimeSync = timesync.Compose(ctx, r.TimeServer)
 
 	rep.Services = []ServiceState{}
 	if r.services != nil {
@@ -557,6 +577,37 @@ func applyUnifiedMemoryDerivation(rep *Report) {
 // On hosts with at least one unified-memory GPU, set
 // GPUDirectSupported=false so consumers know the absence of
 // nvidia_peermem is intentional, not a configuration error.
+// applyThermalOverlay merges readings from the thermal probe into the
+// CPU and GPU sections. The probe lives in its own package because the
+// darwin path (powermetrics shell-out) is too expensive to run on the
+// /health request thread; this overlay reads the probe's cached
+// snapshot, which is non-blocking.
+//
+// CPU: temps_c is additive — appended after whatever gopsutil's
+// host.SensorsTemperatures() produced. On Apple Silicon gopsutil
+// returns nothing, so the "cpu_die" entry is the only signal; on Intel
+// hardware gopsutil's SMC keys still populate, and the overlay adds a
+// canonical die-temp entry alongside.
+//
+// GPU: TempC is overwritten only on unified-memory GPUs (Apple
+// Silicon) where the underlying probe always reports 0. Discrete NVIDIA
+// GPUs already have temps from nvidia-smi and we don't touch them.
+func applyThermalOverlay(rep *Report, snap thermal.Snapshot) {
+	if snap.HaveCPU {
+		rep.CPU.TempsC = append(rep.CPU.TempsC, TempSensor{
+			Sensor: "cpu_die",
+			Value:  round2(snap.CPUDieC),
+		})
+	}
+	if snap.HaveGPU {
+		for i := range rep.GPUs {
+			if rep.GPUs[i].VRAMUnified && rep.GPUs[i].TempC == 0 {
+				rep.GPUs[i].TempC = int(snap.GPUDieC + 0.5)
+			}
+		}
+	}
+}
+
 func applyGPUDirectCapability(rep *Report) {
 	if rep.RDMA == nil {
 		return

@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-// Probe shells `sntp -t 1 time.apple.com` if available. Many Macs disable
-// outbound NTP queries except by the system daemon, so this is best-effort.
-// Returns nil when nothing parses cleanly.
-func Probe(ctx context.Context) *Info {
+// probeOSSync shells `sntp -t 1 time.apple.com` if available. Many Macs
+// disable outbound NTP queries except by the system daemon, so this is
+// best-effort. Returns nil when nothing parses cleanly. Caller is
+// Compose(); not exported.
+func probeOSSync(ctx context.Context) *Info {
 	if _, err := exec.LookPath("sntp"); err != nil {
 		return nil
 	}

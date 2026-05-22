@@ -17,8 +17,15 @@ ships in-place config migration (config.yaml.bak), and v0.2.8 fixes
 darwin /health latency (the 5s DNS dead-weight removed), populates
 darwin cpu.vendor / cpu.usage_pct / memory.pressure natively, makes
 vllm_down opt-in (no longer fires under `auto`), and splits the
-degraded boolean into `degraded_hard` / `degraded_soft`. All v0.2.x
-additions are additive — no config, no breaking changes.
+degraded boolean into `degraded_hard` / `degraded_soft`. v0.2.11 adds
+`powermetrics`-driven CPU / GPU die temps on Apple Silicon (Mac
+Studio, M1/M2/M3) and cross-node time alignment: high-precision
+`time_sync.now_unix_ns` for backend-side offset comparison plus an
+optional agent-driven NTP probe (default `time.cloudflare.com`,
+opt-out via `timesync.server: ""`) with new soft degraded reason
+`clock_offset_high`. All v0.2.x additions are additive; v0.2.11 is
+the first to introduce a config knob (handled gracefully by the
+existing migrator's missing-top-key detection).
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

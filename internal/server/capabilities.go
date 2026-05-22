@@ -94,5 +94,13 @@ func systemMetricsFieldList() []string {
 	if runtime.GOOS == "linux" {
 		out = append(out, "time_sync.skew_ms")
 	}
+	// time_sync.now_unix_ns and the agent-driven server probe work on
+	// every OS (UDP NTP doesn't care about the host OS) — distinct from
+	// the OS-sync-daemon fields which are Linux-only today.
+	out = append(out,
+		"time_sync.now_unix_ns",
+		"time_sync.tz_name",
+		"time_sync.server.offset_ms",
+	)
 	return out
 }

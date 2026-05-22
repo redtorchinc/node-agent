@@ -47,7 +47,7 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /health` | none (LAN) | Real CPU/mem/swap, GPU per-device, disk, network, time sync, per-platform model state (Ollama + vLLM), allowlisted service state, RDMA fabric (Linux DGX), `degraded_reasons`. The case-manager's `rank_nodes()` consumes the reasons list directly. |
+| `GET /health` | none (LAN) | Real CPU/mem/swap, GPU per-device, disk, network, **time sync (incl. high-precision `now_unix_ns` and an agent-driven NTP probe against `time.cloudflare.com` by default — the case-manager subtracts these across nodes to surface cross-node offsets)**, per-platform model state (Ollama + vLLM), allowlisted service state, RDMA fabric (Linux DGX), `degraded_reasons`. The case-manager's `rank_nodes()` consumes the reasons list directly. |
 | `GET /capabilities` | none (LAN) | What this build can do on this OS — used by the dispatcher for feature detection. |
 | `GET /version` | none (LAN) | Version / git SHA / build time. |
 | `GET /metrics` | none (LAN) | Prometheus text format (behind `metrics_enabled: true`). |
@@ -145,8 +145,11 @@ Notes:
 Notes:
 - `POST /actions/service` returns **501** on Windows (same rationale as
   macOS).
-- `GET /health.time_sync` is **omitted** on Windows (no `w32tm` parser
-  in v0.2).
+- `GET /health.time_sync` is **always emitted** — the wall-clock
+  fields (`now_unix_ns`, `now_iso`, `tz_*`) and the agent-driven
+  `server.*` subblock work cross-platform. Only the OS-sync-daemon
+  subset (`source`, `synced`, `skew_ms`, `stratum`, `last_update_s`)
+  is absent on Windows (no `w32tm` parser in v0.2).
 
 ### Cross-platform CLI (works on every OS)
 

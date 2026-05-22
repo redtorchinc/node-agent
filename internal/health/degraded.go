@@ -34,6 +34,7 @@ const (
 	// v0.2.0 soft reasons
 	ReasonDiskOver90pct        = "disk_over_90pct"
 	ReasonClockSkewHigh        = "clock_skew_high"
+	ReasonClockOffsetHigh      = "clock_offset_high"
 	ReasonCPUThermalThrottling = "cpu_thermal_throttling"
 	ReasonGPUThermalThrottling = "gpu_thermal_throttling"
 	ReasonGPUPowerThrottling   = "gpu_power_throttling"
@@ -155,6 +156,9 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if clockSkewHigh(r) {
 		reasons = append(reasons, ReasonClockSkewHigh)
 	}
+	if clockOffsetHigh(r) {
+		reasons = append(reasons, ReasonClockOffsetHigh)
+	}
 	if r.CPU.Throttled != nil && *r.CPU.Throttled {
 		reasons = append(reasons, ReasonCPUThermalThrottling)
 	}
@@ -236,6 +240,23 @@ func clockSkewHigh(r Report) bool {
 		return false
 	}
 	v := *r.TimeSync.SkewMS
+	if v < 0 {
+		v = -v
+	}
+	return v > 100
+}
+
+// clockOffsetHigh fires when the agent's own NTP probe against
+// timesync.server disagrees with the local clock by more than 100 ms.
+// Independent of clockSkewHigh — the local OS sync daemon and the
+// agent-driven probe are two independent reference points and both
+// can fire. Silent when no server is configured or no successful probe
+// has completed yet (silence beats fabrication).
+func clockOffsetHigh(r Report) bool {
+	if r.TimeSync == nil || r.TimeSync.Server == nil || r.TimeSync.Server.OffsetMS == nil {
+		return false
+	}
+	v := *r.TimeSync.Server.OffsetMS
 	if v < 0 {
 		v = -v
 	}

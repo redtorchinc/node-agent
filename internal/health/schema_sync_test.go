@@ -66,6 +66,7 @@ func TestDegradedReasonsDocsInSync(t *testing.T) {
 		// v0.2.0 soft
 		ReasonDiskOver90pct,
 		ReasonClockSkewHigh,
+		ReasonClockOffsetHigh,
 		ReasonCPUThermalThrottling,
 		ReasonGPUThermalThrottling,
 		ReasonGPUPowerThrottling,

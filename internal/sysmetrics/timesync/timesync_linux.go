@@ -11,10 +11,11 @@ import (
 	"time"
 )
 
-// Probe runs `chronyc tracking` first, falling back to `timedatectl
+// probeOSSync runs `chronyc tracking` first, falling back to `timedatectl
 // show-timesync`. Returns nil when neither tool produces parseable output —
-// the agent should treat that as "unknown" rather than synthesise a value.
-func Probe(ctx context.Context) *Info {
+// the composer treats that as "unknown" rather than synthesise a value.
+// Caller is Compose(); not exported.
+func probeOSSync(ctx context.Context) *Info {
 	if i := probeChrony(ctx); i != nil {
 		return i
 	}

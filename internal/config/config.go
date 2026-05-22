@@ -47,6 +47,17 @@ type Config struct {
 
 	TrainingMode TrainingModeConfig `yaml:"training_mode"`
 	RDMA         RDMAConfig         `yaml:"rdma"`
+	TimeSync     TimeSyncConfig     `yaml:"timesync"`
+}
+
+// TimeSyncConfig configures the agent's own NTP probe surfaced under
+// /health.time_sync.server. Independent of the local OS sync daemon.
+type TimeSyncConfig struct {
+	// Server is the NTP hostname (with optional :port; 123 assumed) the
+	// agent queries on a 60s background loop. Empty disables the probe
+	// — /health.time_sync.server is then omitted entirely. Default:
+	// time.cloudflare.com (set in Defaults()).
+	Server string `yaml:"server"`
 }
 
 // PlatformsConfig wires per-platform detection.
@@ -124,6 +135,9 @@ func Defaults() Config {
 			PFCStormThresholdRxRate: 1000,
 			PFCStormWindowS:         30,
 			ErrorsGrowingWindowS:    60,
+		},
+		TimeSync: TimeSyncConfig{
+			Server: "time.cloudflare.com",
 		},
 	}
 }

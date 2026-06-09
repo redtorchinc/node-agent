@@ -83,6 +83,91 @@ func TestHistogramQuantile_AbsentReturnsFalse(t *testing.T) {
 	}
 }
 
+// vLLM ≥0.6 metric exposition: kv_cache_usage_perc gauge,
+// prefix_cache_hits_total/queries_total counters, and the renamed
+// request_time_per_output_token_seconds histogram.
+const sampleV06 = `# HELP vllm:kv_cache_usage_perc KV cache usage [0..1].
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{model_name="qwen3-vl:32b"} 0.5
+# HELP vllm:prefix_cache_hits_total Prefix cache hits.
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{model_name="qwen3-vl:32b"} 80
+# HELP vllm:prefix_cache_queries_total Prefix cache queries.
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{model_name="qwen3-vl:32b"} 100
+# HELP vllm:request_time_per_output_token_seconds TPOT.
+# TYPE vllm:request_time_per_output_token_seconds histogram
+vllm:request_time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.01"} 0
+vllm:request_time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.02"} 50
+vllm:request_time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.05"} 90
+vllm:request_time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.1"} 99
+vllm:request_time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="+Inf"} 100
+vllm:request_time_per_output_token_seconds_sum{model_name="qwen3-vl:32b"} 2.0
+vllm:request_time_per_output_token_seconds_count{model_name="qwen3-vl:32b"} 100
+`
+
+// Pre-0.6 exposition: the legacy gauge names + time_per_output_token_seconds.
+// Same observable values as sampleV06 so the fallback paths must produce
+// identical Model output.
+const sampleLegacy = `# HELP vllm:gpu_cache_usage_perc KV cache GPU usage [0..1].
+# TYPE vllm:gpu_cache_usage_perc gauge
+vllm:gpu_cache_usage_perc{model_name="qwen3-vl:32b"} 0.5
+# HELP vllm:gpu_prefix_cache_hit_rate Prefix cache hit rate.
+# TYPE vllm:gpu_prefix_cache_hit_rate gauge
+vllm:gpu_prefix_cache_hit_rate{model_name="qwen3-vl:32b"} 0.8
+# HELP vllm:time_per_output_token_seconds TPOT.
+# TYPE vllm:time_per_output_token_seconds histogram
+vllm:time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.01"} 0
+vllm:time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.02"} 50
+vllm:time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.05"} 90
+vllm:time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="0.1"} 99
+vllm:time_per_output_token_seconds_bucket{model_name="qwen3-vl:32b",le="+Inf"} 100
+vllm:time_per_output_token_seconds_sum{model_name="qwen3-vl:32b"} 2.0
+vllm:time_per_output_token_seconds_count{model_name="qwen3-vl:32b"} 100
+`
+
+// buildModel must produce identical kv_cache + tpot output whether the node
+// runs vLLM ≥0.6 (renamed metrics) or an older build (legacy names via the
+// backward-compat fallback). Regression guard for the metric-name drift that
+// silently emptied kv_cache/tpot until v0.2.12.
+func TestBuildModel_MetricRenames(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		metrics string
+	}{
+		{"vllm>=0.6", sampleV06},
+		{"legacy", sampleLegacy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := vllmModel{ID: "qwen3-vl:32b"}
+			got := buildModel(m, parsePrometheus(tc.metrics), 0, nil, 0)
+
+			if got.KVCache == nil {
+				t.Fatalf("KVCache nil — kv_cache_usage/prefix metrics not mapped")
+			}
+			// 0.5 fraction → 50 percent.
+			if got.KVCache.GPUUsagePct == nil || math.Abs(*got.KVCache.GPUUsagePct-50) > 1e-6 {
+				t.Errorf("GPUUsagePct = %v, want 50", got.KVCache.GPUUsagePct)
+			}
+			// hits/queries = 80/100 = 0.8 (legacy gauge is 0.8 directly).
+			if got.KVCache.PrefixCacheHitRate == nil || math.Abs(*got.KVCache.PrefixCacheHitRate-0.8) > 1e-6 {
+				t.Errorf("PrefixCacheHitRate = %v, want 0.8", got.KVCache.PrefixCacheHitRate)
+			}
+
+			if got.Latency == nil {
+				t.Fatalf("Latency nil — tpot histogram not mapped")
+			}
+			// p50 bucket [0.01..0.02] → 0.02s → 20ms; p99 → 0.1s → 100ms.
+			if got.Latency.TPOTp50 == nil || math.Abs(*got.Latency.TPOTp50-20) > 1e-6 {
+				t.Errorf("TPOTp50 = %v, want 20ms", got.Latency.TPOTp50)
+			}
+			if got.Latency.TPOTp99 == nil || math.Abs(*got.Latency.TPOTp99-100) > 1e-6 {
+				t.Errorf("TPOTp99 = %v, want 100ms", got.Latency.TPOTp99)
+			}
+		})
+	}
+}
+
 func TestParseLabelSet_Quoted(t *testing.T) {
 	got := parseLabelSet(`a="1",b="two",c="three"`)
 	if len(got) != 3 {

@@ -25,11 +25,19 @@ just deprioritizing.
 
 ## Histogram → percentile
 
-vLLM exposes `time_to_first_token_seconds`, `time_per_output_token_seconds`,
-and `e2e_request_latency_seconds` as histograms. The agent computes p50
-and p99 via linear interpolation between bucket edges (the same algorithm
-Prometheus's `histogram_quantile` uses). Returned in `/health` as
-milliseconds for convenience.
+vLLM exposes `time_to_first_token_seconds`, the per-output-token latency
+histogram, and `e2e_request_latency_seconds` as histograms. The agent
+computes p50 and p99 via linear interpolation between bucket edges (the
+same algorithm Prometheus's `histogram_quantile` uses). Returned in
+`/health` as milliseconds for convenience.
+
+vLLM ≥0.6 renamed the per-output-token histogram
+`time_per_output_token_seconds` → `request_time_per_output_token_seconds`
+(and `gpu_cache_usage_perc` → `kv_cache_usage_perc`, and replaced the
+`gpu_prefix_cache_hit_rate` gauge with `prefix_cache_hits_total` /
+`prefix_cache_queries_total` counters). The agent reads the new names
+first and falls back to the legacy names, so both old and new vLLM nodes
+populate `kv_cache` and `tpot`.
 
 If you need other quantiles, scrape `/metrics` directly and compute in
 PromQL — the agent only surfaces p50/p99 to keep `/health` payload small.

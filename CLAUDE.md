@@ -25,7 +25,12 @@ optional agent-driven NTP probe (default `time.cloudflare.com`,
 opt-out via `timesync.server: ""`) with new soft degraded reason
 `clock_offset_high`. All v0.2.x additions are additive; v0.2.11 is
 the first to introduce a config knob (handled gracefully by the
-existing migrator's missing-top-key detection).
+existing migrator's missing-top-key detection). v0.2.12 maps the
+vLLM metric names that ≥0.6 renamed (`kv_cache_usage_perc`,
+`prefix_cache_hits_total` / `prefix_cache_queries_total`,
+`request_time_per_output_token_seconds`) with backward-compat
+fallback to the legacy names, so `kv_cache` and `tpot` populate
+again on current GB10 nodes. No wire-contract or config change.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

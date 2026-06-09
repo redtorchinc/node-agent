@@ -242,13 +242,24 @@ func buildModel(m vllmModel, prom *promSnapshot, ts int64, prev *promSnapshot, i
 		out.Queue = q
 	}
 	kv := &platforms.KVCache{}
-	if v, ok := prom.gauge("vllm:gpu_cache_usage_perc", label); ok {
+	// vLLM ≥0.6 renamed gpu_cache_usage_perc → kv_cache_usage_perc (fraction
+	// 0-1). Try the new name first, fall back to the legacy gauge.
+	if v, ok := prom.gauge("vllm:kv_cache_usage_perc", label); ok {
+		kv.GPUUsagePct = platforms.Float64Ptr(v * 100)
+	} else if v, ok := prom.gauge("vllm:gpu_cache_usage_perc", label); ok {
 		kv.GPUUsagePct = platforms.Float64Ptr(v * 100)
 	}
 	if v, ok := prom.gauge("vllm:cpu_cache_usage_perc", label); ok {
 		kv.CPUUsagePct = platforms.Float64Ptr(v * 100)
 	}
-	if v, ok := prom.gauge("vllm:gpu_prefix_cache_hit_rate", label); ok {
+	// vLLM ≥0.6 dropped the gpu_prefix_cache_hit_rate gauge and exposes
+	// prefix_cache_hits_total / prefix_cache_queries_total counters instead.
+	// Lifetime hit-rate = hits/queries; fall back to the legacy gauge.
+	if hits, ok := prom.counter("vllm:prefix_cache_hits_total", label); ok {
+		if q, ok2 := prom.counter("vllm:prefix_cache_queries_total", label); ok2 && q > 0 {
+			kv.PrefixCacheHitRate = platforms.Float64Ptr(hits / q)
+		}
+	} else if v, ok := prom.gauge("vllm:gpu_prefix_cache_hit_rate", label); ok {
 		kv.PrefixCacheHitRate = platforms.Float64Ptr(v)
 	}
 	if kv.GPUUsagePct != nil || kv.CPUUsagePct != nil || kv.PrefixCacheHitRate != nil {
@@ -262,10 +273,18 @@ func buildModel(m vllmModel, prom *promSnapshot, ts int64, prev *promSnapshot, i
 	if p99, ok := prom.histogramQuantile("vllm:time_to_first_token_seconds", label, 0.99); ok {
 		lat.TTFTp99 = platforms.Float64Ptr(p99 * 1000)
 	}
-	if p50, ok := prom.histogramQuantile("vllm:time_per_output_token_seconds", label, 0.5); ok {
+	// vLLM ≥0.6 renamed time_per_output_token_seconds →
+	// request_time_per_output_token_seconds. Try the new name, fall back.
+	tpot := func(q float64) (float64, bool) {
+		if v, ok := prom.histogramQuantile("vllm:request_time_per_output_token_seconds", label, q); ok {
+			return v, true
+		}
+		return prom.histogramQuantile("vllm:time_per_output_token_seconds", label, q)
+	}
+	if p50, ok := tpot(0.5); ok {
 		lat.TPOTp50 = platforms.Float64Ptr(p50 * 1000)
 	}
-	if p99, ok := prom.histogramQuantile("vllm:time_per_output_token_seconds", label, 0.99); ok {
+	if p99, ok := tpot(0.99); ok {
 		lat.TPOTp99 = platforms.Float64Ptr(p99 * 1000)
 	}
 	if p50, ok := prom.histogramQuantile("vllm:e2e_request_latency_seconds", label, 0.5); ok {

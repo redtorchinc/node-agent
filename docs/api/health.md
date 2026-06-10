@@ -157,9 +157,13 @@ fields they already know about.
           "loaded": true,
           "context_window": 32768,
           "queue": {"running": 2, "waiting": 0},
-          "kv_cache": {"gpu_usage_pct": 74.3, "prefix_cache_hit_rate": 0.61},
-          "latency_ms": {"ttft_p50": 142, "ttft_p99": 480},
-          "counters": {"requests_success_total": 18472, "prompt_tokens_total": 92481723}
+          "kv_cache": {"gpu_usage_pct": 74.3, "prefix_cache_hit_rate": 0.61,
+                       "prefix_cache_hits_total": 56413852, "prefix_cache_queries_total": 92481723},
+          "latency_ms": {"ttft_p50": 142, "ttft_p99": 480,
+                         "prefill_p50": 920, "prefill_p99": 4100,
+                         "decode_p50": 6400, "decode_p99": 31000},
+          "counters": {"requests_success_total": 18472, "requests_failed_total": 3,
+                       "prompt_tokens_total": 92481723, "prompt_tokens_cached_total": 56413852}
         }
       ]
     }

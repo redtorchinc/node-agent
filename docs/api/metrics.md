@@ -42,13 +42,25 @@ rt_node_model_queue_running{platform="vllm",model="qwen3-vl:32b"}     <int>
 rt_node_model_queue_waiting{platform="vllm",model="qwen3-vl:32b"}     <int>
 rt_node_model_kv_cache_gpu_usage_pct{...}                             <0..100>
 rt_node_model_kv_cache_prefix_hit_rate{...}                           <0..1>
+rt_node_model_kv_cache_prefix_hits_total{...}                         <counter>   # v0.2.13, vLLM ≥0.6 only
+rt_node_model_kv_cache_prefix_queries_total{...}                      <counter>   # v0.2.13, vLLM ≥0.6 only
 rt_node_model_ttft_seconds{...,quantile="0.5"}                        <float>
 rt_node_model_ttft_seconds{...,quantile="0.99"}                       <float>
 rt_node_model_tpot_seconds{...,quantile="0.5"}                        <float>
+rt_node_model_prefill_seconds{...,quantile="0.5"}                     <float>     # v0.2.13: PREFILL phase time
+rt_node_model_prefill_seconds{...,quantile="0.99"}                    <float>
+rt_node_model_decode_seconds{...,quantile="0.5"}                      <float>     # v0.2.13: DECODE phase time
+rt_node_model_decode_seconds{...,quantile="0.99"}                     <float>
 rt_node_model_requests_success_total{...}                             <counter>
+rt_node_model_requests_failed_total{...}                              <counter>   # v0.2.13: abort + error
 rt_node_model_prompt_tokens_total{...}                                <counter>
+rt_node_model_prompt_tokens_cached_total{...}                         <counter>   # v0.2.13: cached prefill tokens
 rt_node_model_generation_tokens_total{...}                            <counter>
 ```
+
+Windowed prefix-cache hit rate (preferable to the lifetime
+`prefix_hit_rate` ratio):
+`rate(rt_node_model_kv_cache_prefix_hits_total[5m]) / rate(rt_node_model_kv_cache_prefix_queries_total[5m])`.
 
 ### Allocators
 

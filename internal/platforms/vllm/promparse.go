@@ -290,7 +290,9 @@ func (s *promSnapshot) gauge(name string, labels map[string]string) (float64, bo
 	return 0, false
 }
 
-// counter returns the cumulative value of the named counter.
+// counter returns the cumulative value of the named counter. First match
+// only — use counterSum for metrics that fan out over an extra label
+// (e.g. vllm:request_success_total has one series per finished_reason).
 func (s *promSnapshot) counter(name string, labels map[string]string) (float64, bool) {
 	for _, ls := range s.counters[name] {
 		if ls.labels.matches(labels) {
@@ -298,6 +300,20 @@ func (s *promSnapshot) counter(name string, labels map[string]string) (float64, 
 		}
 	}
 	return 0, false
+}
+
+// counterSum sums every series of the named counter whose labels contain
+// all of the given labels. ok=false when no series matched at all.
+func (s *promSnapshot) counterSum(name string, labels map[string]string) (float64, bool) {
+	var sum float64
+	found := false
+	for _, ls := range s.counters[name] {
+		if ls.labels.matches(labels) {
+			sum += ls.value
+			found = true
+		}
+	}
+	return sum, found
 }
 
 // histogramQuantile returns the value at the given quantile (0..1) using

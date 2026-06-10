@@ -100,20 +100,32 @@ type Queue struct {
 }
 
 // KVCache reports vLLM's KV cache utilization and prefix-cache hit rate.
+// The raw hit/query token counts (v0.2.13) sit behind the rate so consumers
+// can compute windowed rates over their own scrape interval instead of
+// being stuck with the lifetime ratio.
 type KVCache struct {
-	GPUUsagePct        *float64 `json:"gpu_usage_pct,omitempty"`
-	CPUUsagePct        *float64 `json:"cpu_usage_pct,omitempty"`
-	PrefixCacheHitRate *float64 `json:"prefix_cache_hit_rate,omitempty"`
+	GPUUsagePct             *float64 `json:"gpu_usage_pct,omitempty"`
+	CPUUsagePct             *float64 `json:"cpu_usage_pct,omitempty"`
+	PrefixCacheHitRate      *float64 `json:"prefix_cache_hit_rate,omitempty"`
+	PrefixCacheHitsTotal    *uint64  `json:"prefix_cache_hits_total,omitempty"`
+	PrefixCacheQueriesTotal *uint64  `json:"prefix_cache_queries_total,omitempty"`
 }
 
-// Latency reports request-latency percentiles in milliseconds.
+// Latency reports request-latency percentiles in milliseconds. Prefill/decode
+// (v0.2.13) come from the per-request phase-time histograms — prefill_p50 is
+// "half of requests spent ≤ this long in the PREFILL phase", not a
+// token-level number.
 type Latency struct {
-	TTFTp50 *float64 `json:"ttft_p50,omitempty"`
-	TTFTp99 *float64 `json:"ttft_p99,omitempty"`
-	TPOTp50 *float64 `json:"tpot_p50,omitempty"`
-	TPOTp99 *float64 `json:"tpot_p99,omitempty"`
-	E2Ep50  *float64 `json:"e2e_p50,omitempty"`
-	E2Ep99  *float64 `json:"e2e_p99,omitempty"`
+	TTFTp50    *float64 `json:"ttft_p50,omitempty"`
+	TTFTp99    *float64 `json:"ttft_p99,omitempty"`
+	TPOTp50    *float64 `json:"tpot_p50,omitempty"`
+	TPOTp99    *float64 `json:"tpot_p99,omitempty"`
+	E2Ep50     *float64 `json:"e2e_p50,omitempty"`
+	E2Ep99     *float64 `json:"e2e_p99,omitempty"`
+	PrefillP50 *float64 `json:"prefill_p50,omitempty"`
+	PrefillP99 *float64 `json:"prefill_p99,omitempty"`
+	DecodeP50  *float64 `json:"decode_p50,omitempty"`
+	DecodeP99  *float64 `json:"decode_p99,omitempty"`
 }
 
 // Throughput reports tokens-per-second rates.
@@ -124,11 +136,20 @@ type Throughput struct {
 }
 
 // Counters are cumulative since the platform started. Use rate() over them.
+//
+// requests_success_total counts requests that produced output (vLLM
+// finished_reason stop/length/repetition); requests_failed_total counts
+// abnormal terminations (abort/error). On vLLM ≥0.6 prompt_tokens_total IS
+// the prefill token count ("Number of prefill tokens processed"), and
+// prompt_tokens_cached_total (v0.2.13) is how many of those were served
+// from cache (local + external) — the per-model aggregate of the
+// OpenAI-API `cached_tokens` field.
 type Counters struct {
-	RequestsSuccessTotal  *uint64 `json:"requests_success_total,omitempty"`
-	RequestsFailedTotal   *uint64 `json:"requests_failed_total,omitempty"`
-	PromptTokensTotal     *uint64 `json:"prompt_tokens_total,omitempty"`
-	GenerationTokensTotal *uint64 `json:"generation_tokens_total,omitempty"`
+	RequestsSuccessTotal    *uint64 `json:"requests_success_total,omitempty"`
+	RequestsFailedTotal     *uint64 `json:"requests_failed_total,omitempty"`
+	PromptTokensTotal       *uint64 `json:"prompt_tokens_total,omitempty"`
+	PromptTokensCachedTotal *uint64 `json:"prompt_tokens_cached_total,omitempty"`
+	GenerationTokensTotal   *uint64 `json:"generation_tokens_total,omitempty"`
 }
 
 // Helper constructors so call sites can write IntPtr(n) instead of taking

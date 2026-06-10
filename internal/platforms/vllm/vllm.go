@@ -254,15 +254,22 @@ func buildModel(m vllmModel, prom *promSnapshot, ts int64, prev *promSnapshot, i
 	}
 	// vLLM ≥0.6 dropped the gpu_prefix_cache_hit_rate gauge and exposes
 	// prefix_cache_hits_total / prefix_cache_queries_total counters instead.
-	// Lifetime hit-rate = hits/queries; fall back to the legacy gauge.
+	// Lifetime hit-rate = hits/queries; fall back to the legacy gauge. The
+	// raw counts are surfaced too (v0.2.13) so consumers can compute
+	// windowed rates — the lifetime ratio washes out behavior changes.
 	if hits, ok := prom.counter("vllm:prefix_cache_hits_total", label); ok {
-		if q, ok2 := prom.counter("vllm:prefix_cache_queries_total", label); ok2 && q > 0 {
-			kv.PrefixCacheHitRate = platforms.Float64Ptr(hits / q)
+		kv.PrefixCacheHitsTotal = platforms.Uint64Ptr(uint64(hits))
+		if q, ok2 := prom.counter("vllm:prefix_cache_queries_total", label); ok2 {
+			kv.PrefixCacheQueriesTotal = platforms.Uint64Ptr(uint64(q))
+			if q > 0 {
+				kv.PrefixCacheHitRate = platforms.Float64Ptr(hits / q)
+			}
 		}
 	} else if v, ok := prom.gauge("vllm:gpu_prefix_cache_hit_rate", label); ok {
 		kv.PrefixCacheHitRate = platforms.Float64Ptr(v)
 	}
-	if kv.GPUUsagePct != nil || kv.CPUUsagePct != nil || kv.PrefixCacheHitRate != nil {
+	if kv.GPUUsagePct != nil || kv.CPUUsagePct != nil || kv.PrefixCacheHitRate != nil ||
+		kv.PrefixCacheHitsTotal != nil {
 		out.KVCache = kv
 	}
 
@@ -293,16 +300,53 @@ func buildModel(m vllmModel, prom *promSnapshot, ts int64, prev *promSnapshot, i
 	if p99, ok := prom.histogramQuantile("vllm:e2e_request_latency_seconds", label, 0.99); ok {
 		lat.E2Ep99 = platforms.Float64Ptr(p99 * 1000)
 	}
-	if lat.TTFTp50 != nil || lat.TTFTp99 != nil || lat.TPOTp50 != nil || lat.E2Ep50 != nil {
+	// Per-request phase-time histograms (v0.2.13): time spent in the
+	// PREFILL / DECODE phases. Gives the prefill-vs-decode split that
+	// TTFT alone can't (TTFT includes queue wait).
+	if p50, ok := prom.histogramQuantile("vllm:request_prefill_time_seconds", label, 0.5); ok {
+		lat.PrefillP50 = platforms.Float64Ptr(p50 * 1000)
+	}
+	if p99, ok := prom.histogramQuantile("vllm:request_prefill_time_seconds", label, 0.99); ok {
+		lat.PrefillP99 = platforms.Float64Ptr(p99 * 1000)
+	}
+	if p50, ok := prom.histogramQuantile("vllm:request_decode_time_seconds", label, 0.5); ok {
+		lat.DecodeP50 = platforms.Float64Ptr(p50 * 1000)
+	}
+	if p99, ok := prom.histogramQuantile("vllm:request_decode_time_seconds", label, 0.99); ok {
+		lat.DecodeP99 = platforms.Float64Ptr(p99 * 1000)
+	}
+	if lat.TTFTp50 != nil || lat.TTFTp99 != nil || lat.TPOTp50 != nil || lat.E2Ep50 != nil ||
+		lat.PrefillP50 != nil || lat.DecodeP50 != nil {
 		out.Latency = lat
 	}
 
 	counters := &platforms.Counters{}
-	if v, ok := prom.counter("vllm:request_success_total", label); ok {
-		counters.RequestsSuccessTotal = platforms.Uint64Ptr(uint64(v))
+	// vllm:request_success_total fans out over finished_reason (stop, length,
+	// abort, error, repetition, …) — one series each. A first-match read
+	// silently reported only the first series (in practice "stop"), so sum
+	// across the label (v0.2.13): success = requests that produced output,
+	// failed = abnormal terminations (abort + error).
+	if total, ok := prom.counterSum("vllm:request_success_total", label); ok {
+		var failed float64
+		for _, reason := range []string{"abort", "error"} {
+			l := map[string]string{"finished_reason": reason}
+			for k, v := range label {
+				l[k] = v
+			}
+			if v, ok2 := prom.counterSum("vllm:request_success_total", l); ok2 {
+				failed += v
+			}
+		}
+		counters.RequestsSuccessTotal = platforms.Uint64Ptr(uint64(total - failed))
+		counters.RequestsFailedTotal = platforms.Uint64Ptr(uint64(failed))
 	}
 	if v, ok := prom.counter("vllm:prompt_tokens_total", label); ok {
 		counters.PromptTokensTotal = platforms.Uint64Ptr(uint64(v))
+	}
+	// Cached prompt tokens (local + external) — the per-model aggregate of
+	// the per-request `cached_tokens` field (v0.2.13).
+	if v, ok := prom.counter("vllm:prompt_tokens_cached_total", label); ok {
+		counters.PromptTokensCachedTotal = platforms.Uint64Ptr(uint64(v))
 	}
 	if v, ok := prom.counter("vllm:generation_tokens_total", label); ok {
 		counters.GenerationTokensTotal = platforms.Uint64Ptr(uint64(v))

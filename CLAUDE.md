@@ -31,6 +31,14 @@ vLLM metric names that ≥0.6 renamed (`kv_cache_usage_perc`,
 `request_time_per_output_token_seconds`) with backward-compat
 fallback to the legacy names, so `kv_cache` and `tpot` populate
 again on current GB10 nodes. No wire-contract or config change.
+v0.2.13 adds eval telemetry (additive, vLLM ≥0.6 only — nil
+otherwise): raw prefix-cache hit/query counts behind the rate,
+PREFILL/DECODE phase-time percentiles (`latency_ms.prefill_*` /
+`decode_*`), `counters.prompt_tokens_cached_total`, and wires the
+declared-but-never-set `requests_failed_total` (finished_reason
+abort+error) — also fixing `requests_success_total` to sum across
+all finished_reason series instead of first-match (which silently
+reported only the `stop` series).
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

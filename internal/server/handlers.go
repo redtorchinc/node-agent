@@ -175,6 +175,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				if m.KVCache.PrefixCacheHitRate != nil {
 					fmt.Fprintf(w, "rt_node_model_kv_cache_prefix_hit_rate{platform=%q,model=%q} %f\n", name, m.Name, *m.KVCache.PrefixCacheHitRate)
 				}
+				if m.KVCache.PrefixCacheHitsTotal != nil {
+					fmt.Fprintf(w, "rt_node_model_kv_cache_prefix_hits_total{platform=%q,model=%q} %d\n", name, m.Name, *m.KVCache.PrefixCacheHitsTotal)
+				}
+				if m.KVCache.PrefixCacheQueriesTotal != nil {
+					fmt.Fprintf(w, "rt_node_model_kv_cache_prefix_queries_total{platform=%q,model=%q} %d\n", name, m.Name, *m.KVCache.PrefixCacheQueriesTotal)
+				}
 			}
 			if m.Latency != nil {
 				if m.Latency.TTFTp50 != nil {
@@ -186,13 +192,31 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				if m.Latency.TPOTp50 != nil {
 					fmt.Fprintf(w, "rt_node_model_tpot_seconds{platform=%q,model=%q,quantile=\"0.5\"} %f\n", name, m.Name, *m.Latency.TPOTp50/1000.0)
 				}
+				if m.Latency.PrefillP50 != nil {
+					fmt.Fprintf(w, "rt_node_model_prefill_seconds{platform=%q,model=%q,quantile=\"0.5\"} %f\n", name, m.Name, *m.Latency.PrefillP50/1000.0)
+				}
+				if m.Latency.PrefillP99 != nil {
+					fmt.Fprintf(w, "rt_node_model_prefill_seconds{platform=%q,model=%q,quantile=\"0.99\"} %f\n", name, m.Name, *m.Latency.PrefillP99/1000.0)
+				}
+				if m.Latency.DecodeP50 != nil {
+					fmt.Fprintf(w, "rt_node_model_decode_seconds{platform=%q,model=%q,quantile=\"0.5\"} %f\n", name, m.Name, *m.Latency.DecodeP50/1000.0)
+				}
+				if m.Latency.DecodeP99 != nil {
+					fmt.Fprintf(w, "rt_node_model_decode_seconds{platform=%q,model=%q,quantile=\"0.99\"} %f\n", name, m.Name, *m.Latency.DecodeP99/1000.0)
+				}
 			}
 			if m.Counters != nil {
 				if m.Counters.RequestsSuccessTotal != nil {
 					fmt.Fprintf(w, "rt_node_model_requests_success_total{platform=%q,model=%q} %d\n", name, m.Name, *m.Counters.RequestsSuccessTotal)
 				}
+				if m.Counters.RequestsFailedTotal != nil {
+					fmt.Fprintf(w, "rt_node_model_requests_failed_total{platform=%q,model=%q} %d\n", name, m.Name, *m.Counters.RequestsFailedTotal)
+				}
 				if m.Counters.PromptTokensTotal != nil {
 					fmt.Fprintf(w, "rt_node_model_prompt_tokens_total{platform=%q,model=%q} %d\n", name, m.Name, *m.Counters.PromptTokensTotal)
+				}
+				if m.Counters.PromptTokensCachedTotal != nil {
+					fmt.Fprintf(w, "rt_node_model_prompt_tokens_cached_total{platform=%q,model=%q} %d\n", name, m.Name, *m.Counters.PromptTokensCachedTotal)
 				}
 				if m.Counters.GenerationTokensTotal != nil {
 					fmt.Fprintf(w, "rt_node_model_generation_tokens_total{platform=%q,model=%q} %d\n", name, m.Name, *m.Counters.GenerationTokensTotal)

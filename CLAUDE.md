@@ -47,6 +47,16 @@ the node↔reference offset (Offset A) from the existing
 (`timesync.offset_degraded_ms`, default 100; `0` disables) for
 measure-only fleets whose clocks intentionally free-run. New
 capability flag `time_handshake_supported`; additive wire change.
+v0.2.15 stops `clock_offset_high` firing off a stale reading: the
+probe retains the last successful `offset_ms` across failures (by
+design, for the wire), but the degraded reason now stays silent
+whenever the most recent probe attempt failed (`server.error` set) —
+an egress-less Mac Studio kept flagging a -488ms fossil against the
+unreachable default `time.cloudflare.com` while its OS clock was
+disciplined by an internal NTP server. Also darwin `probeOSSync` now
+queries the **configured** `timesync.server` (falling back to
+`time.apple.com` only when unset) and parses the sntp offset into
+`skew_ms` instead of dropping it.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

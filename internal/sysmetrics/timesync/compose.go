@@ -33,7 +33,7 @@ func Compose(ctx context.Context, serverProbe *ServerProbe) *Info {
 		TZName:    zone,
 		TZOffsetS: offsetS,
 	}
-	if os := probeOSSync(ctx); os != nil {
+	if os := probeOSSync(ctx, serverProbe.Host()); os != nil {
 		info.Source = os.Source
 		info.Synced = os.Synced
 		info.SkewMS = os.SkewMS

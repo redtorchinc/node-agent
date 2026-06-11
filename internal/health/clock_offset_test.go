@@ -87,6 +87,30 @@ func TestEvaluate_ClockOffsetHigh_SilentBeforeFirstProbe(t *testing.T) {
 	}
 }
 
+// The probe retains the last successful OffsetMS across failures so the
+// wire keeps showing the last-known value — but the degraded reason must
+// NOT fire off that fossil. Real incident (2026-06-11): an egress-less Mac
+// Studio pointed at the default time.cloudflare.com kept flagging
+// clock_offset_high from a -488ms reading taken before egress was cut,
+// while its OS clock was disciplined by an internal NTP server the whole
+// time. Error != "" marks the reading stale.
+func TestEvaluate_ClockOffsetHigh_SilentOnStaleReading(t *testing.T) {
+	now := time.Unix(1713820000, 0)
+	r := cleanReport(now)
+	v := -488.7
+	r.TimeSync = &timesync.Info{
+		Server: &timesync.ServerInfo{
+			Host:     "time.cloudflare.com",
+			OffsetMS: &v,        // retained from an old success
+			Error:    "timeout", // ...but the most recent attempt failed
+		},
+	}
+	_, reasons := Evaluate(r, offsetCfg(100), now)
+	if contains(reasons, ReasonClockOffsetHigh) {
+		t.Errorf("clock_offset_high must be silent when the latest probe failed (stale reading); got %v", reasons)
+	}
+}
+
 // Measure-only fleets disable the reason (offset_degraded_ms <= 0): even a
 // large offset must stay silent, because the clock is intentionally
 // free-running and the offset is compensated by the backend, not the node.

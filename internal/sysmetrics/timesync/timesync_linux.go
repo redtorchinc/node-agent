@@ -15,7 +15,7 @@ import (
 // show-timesync`. Returns nil when neither tool produces parseable output —
 // the composer treats that as "unknown" rather than synthesise a value.
 // Caller is Compose(); not exported.
-func probeOSSync(ctx context.Context) *Info {
+func probeOSSync(ctx context.Context, _ string) *Info {
 	if i := probeChrony(ctx); i != nil {
 		return i
 	}

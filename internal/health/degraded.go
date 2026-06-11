@@ -253,14 +253,26 @@ func clockSkewHigh(r Report) bool {
 // agent-driven probe are two independent reference points and both
 // can fire. Silent when the threshold is <= 0 (disabled, e.g. measure-only
 // fleets that intentionally let clocks free-run), when no server is
-// configured, or when no successful probe has completed yet (silence
-// beats fabrication).
+// configured, when no successful probe has completed yet, or when the
+// most recent probe attempt FAILED (silence beats fabrication).
 func clockOffsetHigh(r Report, cfg config.Config) bool {
 	thresh := cfg.TimeSync.OffsetDegradedMS
 	if thresh <= 0 {
 		return false
 	}
 	if r.TimeSync == nil || r.TimeSync.Server == nil || r.TimeSync.Server.OffsetMS == nil {
+		return false
+	}
+	// FIX(2026-06-11): the probe deliberately retains the last successful
+	// OffsetMS across failures (a brief outage shouldn't blank the wire),
+	// but firing the degraded reason off that fossil is fabrication. An
+	// egress-less fleet pointed at the default public server kept flagging
+	// clock_offset_high from a reading taken before egress was cut, while
+	// the OS clock was actually disciplined by an internal NTP server.
+	// Error != "" means the most recent attempt failed → the reading is
+	// stale → stay silent and let the wire (offset_ms + error side by
+	// side) tell the story.
+	if r.TimeSync.Server.Error != "" {
 		return false
 	}
 	v := *r.TimeSync.Server.OffsetMS

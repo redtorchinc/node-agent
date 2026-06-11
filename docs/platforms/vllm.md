@@ -42,6 +42,39 @@ populate `kv_cache` and `tpot`.
 If you need other quantiles, scrape `/metrics` directly and compute in
 PromQL — the agent only surfaces p50/p99 to keep `/health` payload small.
 
+## Eval telemetry (v0.2.13)
+
+For serving-efficiency evaluation the agent additionally surfaces, per
+model (all additive, nil when the underlying series is absent — i.e. on
+pre-0.6 vLLM):
+
+- `kv_cache.prefix_cache_hits_total` / `prefix_cache_queries_total` — the
+  raw token counts behind `prefix_cache_hit_rate`, so consumers can compute
+  *windowed* hit rates across their own scrape interval instead of the
+  lifetime ratio (which washes out behavior changes).
+- `latency_ms.prefill_p50/p99` and `decode_p50/p99` — per-request
+  PREFILL / DECODE phase-time histograms
+  (`vllm:request_prefill_time_seconds`, `vllm:request_decode_time_seconds`).
+  Note these are request-phase durations, not token-level timings; TTFT
+  also includes queue wait, these don't.
+- `counters.prompt_tokens_cached_total` — cached prompt tokens (local +
+  external), the per-model aggregate of the per-request `cached_tokens`.
+- `counters.requests_failed_total` — now wired (was declared but never
+  assigned): finished_reason `abort` + `error`. In the same change
+  `requests_success_total` was fixed to sum across **all** finished_reason
+  series minus failures — previously a first-match read reported only the
+  first series (in practice `stop`), undercounting `length`/`repetition`
+  completions.
+
+vLLM does not expose a prefill-tokens counter separate from
+`prompt_tokens_total` ("Number of prefill tokens processed" on ≥0.6), so
+there is deliberately no `prefill_tokens_total` / `prefill_tokens_per_s` —
+use `prompt_tokens_total` / `throughput.prompt_tokens_per_s`.
+
+Per-*request* granularity (per-request cached_tokens, request logs) is out
+of the agent's lane — read vLLM `/metrics` or request logs directly for
+that; the agent provides node-level rollups.
+
 ## Throughput rates
 
 `throughput.prompt_tokens_per_s` and `throughput.generation_tokens_per_s`

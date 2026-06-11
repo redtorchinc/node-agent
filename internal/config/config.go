@@ -56,8 +56,19 @@ type TimeSyncConfig struct {
 	// Server is the NTP hostname (with optional :port; 123 assumed) the
 	// agent queries on a 60s background loop. Empty disables the probe
 	// — /health.time_sync.server is then omitted entirely. Default:
-	// time.cloudflare.com (set in Defaults()).
+	// time.cloudflare.com (set in Defaults()). Air-gapped fleets must
+	// point this at an internal NTP server or the probe only logs
+	// timeouts and clock_offset_high goes blind.
 	Server string `yaml:"server"`
+
+	// OffsetDegradedMS is the |offset_ms| threshold (from the agent's NTP
+	// probe against Server) above which the soft degraded reason
+	// clock_offset_high fires. Zero or negative disables the reason —
+	// appropriate for measure-only fleets whose node clocks intentionally
+	// free-run (the offset is consumed/compensated by the backend rather
+	// than disciplined on the node), where a fixed threshold would just
+	// latch permanently. Default 100 (set in Defaults()).
+	OffsetDegradedMS float64 `yaml:"offset_degraded_ms"`
 }
 
 // PlatformsConfig wires per-platform detection.
@@ -137,7 +148,8 @@ func Defaults() Config {
 			ErrorsGrowingWindowS:    60,
 		},
 		TimeSync: TimeSyncConfig{
-			Server: "time.cloudflare.com",
+			Server:           "time.cloudflare.com",
+			OffsetDegradedMS: 100,
 		},
 	}
 }

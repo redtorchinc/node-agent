@@ -38,7 +38,15 @@ PREFILL/DECODE phase-time percentiles (`latency_ms.prefill_*` /
 declared-but-never-set `requests_failed_total` (finished_reason
 abort+error) — also fixing `requests_success_total` to sum across
 all finished_reason series instead of first-match (which silently
-reported only the `stop` series).
+reported only the `stop` series). v0.2.14 adds the `GET /time`
+endpoint — an NTP-style four-timestamp handshake so the backend can
+measure caller↔node clock offset (Offset B) to sub-ms, complementing
+the node↔reference offset (Offset A) from the existing
+`timesync.server` probe (now also folded into `/time`). The
+`clock_offset_high` threshold becomes configurable
+(`timesync.offset_degraded_ms`, default 100; `0` disables) for
+measure-only fleets whose clocks intentionally free-run. New
+capability flag `time_handshake_supported`; additive wire change.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

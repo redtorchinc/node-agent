@@ -116,13 +116,22 @@ service_allocators:
 # compute cross-node offsets. When ` + "`timesync.server`" + ` is set (the default),
 # the agent additionally runs its own NTP query against that server every
 # 60s and surfaces local-vs-server offset under
-# /health.time_sync.server.{offset_ms,rtt_ms,stratum,error}. The new soft
-# degraded reason ` + "`clock_offset_high`" + ` fires when |offset_ms| > 100.
+# /health.time_sync.server.{offset_ms,rtt_ms,stratum,error} (this is
+# "Offset A" — node vs reference). GET /time exposes the same probe plus a
+# four-timestamp handshake for the caller to measure "Offset B" (caller vs
+# node) to sub-ms; see SPEC.md.
 #
-# Set to the empty string to disable the agent-driven probe entirely
-# (the wall-clock + OS-sync fields still populate). The default points at
-# Cloudflare's public anycast NTP service — accurate, NTS-capable, no
-# leap-second smearing.
+# Set 'server' to the empty string to disable the agent-driven probe
+# entirely (the wall-clock + OS-sync fields still populate). The default
+# points at Cloudflare's public anycast NTP service — AIR-GAPPED FLEETS
+# MUST change this to an internal NTP server, else the probe only logs
+# timeouts and Offset A / clock_offset_high go blind.
+#
+# offset_degraded_ms: |offset_ms| above which the soft degraded reason
+# clock_offset_high fires. Set to 0 to disable — appropriate for
+# measure-only fleets whose clocks intentionally free-run (the backend
+# compensates with the measured offset rather than disciplining the node).
 timesync:
   server: time.cloudflare.com
+  offset_degraded_ms: 100
 `

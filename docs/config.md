@@ -115,6 +115,26 @@ rdma:
 
 See [rdma.md](rdma.md). Linux-only; ignored on macOS/Windows.
 
+## `timesync`
+
+```yaml
+timesync:
+  server: time.cloudflare.com   # NTP server the agent probes (Offset A). "" disables the probe.
+  offset_degraded_ms: 100       # |offset_ms| that fires clock_offset_high. 0 disables (measure-only).
+```
+
+- `server` is the NTP host the agent queries every 60s; the result feeds
+  `time_sync.server.*` and `GET /time`. **Air-gapped fleets must set this
+  to an internal NTP server** — the `time.cloudflare.com` default is
+  unreachable offline, leaving the probe blind.
+- `offset_degraded_ms` is the `clock_offset_high` threshold. Set to `0`
+  (or negative) to disable the reason on measure-only fleets whose clocks
+  intentionally free-run.
+
+See [api/time.md](api/time.md) for the two-offset model and the
+caller↔node handshake. Works on every OS (NTP is UDP); the OS-sync-daemon
+fields (`source`/`skew_ms`) are Linux/macOS-only.
+
 ## Environment variables (override file)
 
 | Variable | Maps to |

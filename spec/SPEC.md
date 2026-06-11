@@ -190,12 +190,50 @@ Response:
 }
 ```
 
-- `now_unix_ns` is the node's wall clock at /health composition time, in nanoseconds since the Unix epoch. Always populated. **Primary cross-node comparison primitive:** the case-manager subtracts this from its own clock to compute a per-node offset (corrected by RTT/2 if it needs sub-ms precision).
+- `now_unix_ns` is the node's wall clock at /health composition time, in nanoseconds since the Unix epoch. Always populated. **Coarse cross-node comparison primitive:** the case-manager subtracts this from its own clock to compute a per-node offset (corrected by RTT/2 if it needs sub-ms precision). It is stamped before serialization, so its accuracy is bounded by the remaining compose+write tail — for sub-ms Offset B use `GET /time` instead.
 - `now_iso` is the same value rendered as RFC3339Nano UTC. Redundant with `now_unix_ns` but cheaper for log dashboards.
 - `tz_name` / `tz_offset_s` describe the node's configured local time zone.
 - `source` / `synced` / `skew_ms` / `stratum` / `last_update_s` come from the local OS sync daemon (chrony or systemd-timesyncd on Linux, sntp on darwin). Absent on Windows (no `w32tm` parser in v0.2.x) and on Linux hosts without either daemon.
 - `server` is the agent's own NTP probe against `timesync.server` from config (default `time.cloudflare.com`). 60s background cadence. `offset_ms` is **LOCAL minus SERVER** (positive = local is ahead of the reference). `error` populates instead when the last probe failed. Omitted entirely when `timesync.server: ""` in config.
 - `clock_skew_high` and `clock_offset_high` are two independent soft degraded reasons — the former reads the OS daemon's view, the latter reads the agent's own probe. Both can fire together when the local daemon and the external reference disagree.
+- `clock_offset_high` fires when `|offset_ms|` exceeds `timesync.offset_degraded_ms` (config, default `100`). Setting it to `0` (or negative) **disables** the reason — intended for measure-only fleets whose node clocks intentionally free-run (the offset is consumed/compensated by the backend rather than disciplined on the node), where a fixed threshold would otherwise latch permanently.
+
+### Two clock offsets (and which to use)
+
+The fleet exposes **two distinct offsets**, both meaningful:
+
+- **Offset A — node ↔ reference.** The node's clock vs. the configured `timesync.server` (an internal NTP box on air-gapped fleets). Measured by the agent's background probe; surfaced as `time_sync.server.offset_ms` (sign **node − reference**, positive = node ahead) and echoed in `GET /time`. Use for cross-node alignment: `node_i − node_j = A_i − A_j`.
+- **Offset B — caller ↔ node.** The calling backend's clock vs. the node's clock, measured by the backend at call time via `GET /time` (below). Use to interpret a node's reported timestamps directly in the backend's own clock frame.
+
+A and B are independent: A anchors every node to a shared reference; B anchors each node to *this* caller, which may run on a different reference (or none).
+
+### `GET /time` (v0.2.14 — caller↔node offset handshake)
+
+A minimal NTP-over-HTTP four-timestamp exchange for sub-millisecond **Offset B**, independent of `/health` composition cost. Open read endpoint (LAN trust, same posture as `/health`). The agent does no probing/allocation between the receive and transmit stamps, so the round-trip the caller measures is dominated by the network path.
+
+Request: `GET /time?t1=<unix_ns>` — `t1` is the caller's send time in Unix nanoseconds (optional; echoed as `0` when absent).
+
+```json
+{
+  "t1_unix_ns": 1749600000000000000,
+  "t2_unix_ns": 1749600000001234567,
+  "t3_unix_ns": 1749600000001240000,
+  "server": {
+    "host": "10.0.0.10",
+    "offset_ms": 1.23,
+    "rtt_ms": 0.4,
+    "stratum": 3,
+    "last_probe_age_s": 7,
+    "probe_interval_s": 60
+  }
+}
+```
+
+- `t2_unix_ns` is the node's receive time (handler entry); `t3_unix_ns` is the node's transmit time (just before the write). The caller records `t4` on receipt and computes, per RFC 5905 §8:
+  - `offset_ms = (((t2 − t1) + (t3 − t4)) / 2) / 1e6` — positive ⇒ **node ahead of caller** (add to the caller's clock to match the node).
+  - `rtt_ms = ((t4 − t1) − (t3 − t2)) / 1e6`.
+- `server` is the same cached probe snapshot as `/health.time_sync.server` (Offset A), folded in so a caller gets both offsets from one cheap call. Omitted when `timesync.server` is empty.
+- Older agents (pre-0.2.14) lack this endpoint — feature-detect via `capabilities.time_handshake_supported` and fall back to `time_sync.now_unix_ns` + the caller's own RTT/2.
 
 ### `degraded_reasons` contract
 

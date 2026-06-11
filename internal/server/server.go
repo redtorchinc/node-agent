@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/time", s.handleTime)
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/capabilities", s.handleCapabilities)
 	mux.HandleFunc("/actions/unload-model", s.requireToken(s.handleUnload))
@@ -122,6 +123,6 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintln(w, "rt-node-agent — see SPEC.md and docs/")
-	fmt.Fprintln(w, "read:    GET /health, GET /version, GET /capabilities, GET /metrics")
+	fmt.Fprintln(w, "read:    GET /health, GET /time, GET /version, GET /capabilities, GET /metrics")
 	fmt.Fprintln(w, "actions: POST /actions/unload-model, POST /actions/service")
 }

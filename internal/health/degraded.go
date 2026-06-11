@@ -156,7 +156,7 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	if clockSkewHigh(r) {
 		reasons = append(reasons, ReasonClockSkewHigh)
 	}
-	if clockOffsetHigh(r) {
+	if clockOffsetHigh(r, cfg) {
 		reasons = append(reasons, ReasonClockOffsetHigh)
 	}
 	if r.CPU.Throttled != nil && *r.CPU.Throttled {
@@ -247,12 +247,19 @@ func clockSkewHigh(r Report) bool {
 }
 
 // clockOffsetHigh fires when the agent's own NTP probe against
-// timesync.server disagrees with the local clock by more than 100 ms.
+// timesync.server disagrees with the local clock by more than the
+// configured threshold (timesync.offset_degraded_ms, default 100 ms).
 // Independent of clockSkewHigh — the local OS sync daemon and the
 // agent-driven probe are two independent reference points and both
-// can fire. Silent when no server is configured or no successful probe
-// has completed yet (silence beats fabrication).
-func clockOffsetHigh(r Report) bool {
+// can fire. Silent when the threshold is <= 0 (disabled, e.g. measure-only
+// fleets that intentionally let clocks free-run), when no server is
+// configured, or when no successful probe has completed yet (silence
+// beats fabrication).
+func clockOffsetHigh(r Report, cfg config.Config) bool {
+	thresh := cfg.TimeSync.OffsetDegradedMS
+	if thresh <= 0 {
+		return false
+	}
 	if r.TimeSync == nil || r.TimeSync.Server == nil || r.TimeSync.Server.OffsetMS == nil {
 		return false
 	}
@@ -260,7 +267,7 @@ func clockOffsetHigh(r Report) bool {
 	if v < 0 {
 		v = -v
 	}
-	return v > 100
+	return v > thresh
 }
 
 // vllmRequiredDown fires when config says vllm is required but the platforms

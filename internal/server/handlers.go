@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redtorchinc/node-agent/internal/buildinfo"
+	"github.com/redtorchinc/node-agent/internal/sysmetrics/timesync"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +40,56 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"git_sha":    buildinfo.GitSHA,
 		"build_time": buildinfo.BuildTime,
 	})
+}
+
+// timeResp is the GET /time wire shape — a minimal NTP-over-HTTP
+// four-timestamp handshake for the caller (the case-manager backend) to
+// compute its own clock offset to this node with sub-ms precision,
+// independent of /health composition cost.
+//
+// The caller passes its send time as ?t1=<unix_ns>. The agent stamps t2
+// the instant the handler runs (receive) and t3 immediately before the
+// write (transmit). The caller records t4 on receipt and computes, per
+// RFC 5905 §8:
+//
+//	offset_ms = (((t2-t1) + (t3-t4)) / 2) / 1e6   // + ⇒ node ahead of caller
+//	rtt_ms    = ((t4-t1) - (t3-t2)) / 1e6
+//
+// This is "Offset B" (caller ↔ node). The embedded Server block is
+// "Offset A" (node ↔ the configured internal reference clock), folded in
+// from the same cached probe that feeds /health.time_sync.server so the
+// backend gets both offsets from one cheap call.
+type timeResp struct {
+	T1UnixNS int64                `json:"t1_unix_ns"` // echoed caller send time (0 if ?t1 absent/unparseable)
+	T2UnixNS int64                `json:"t2_unix_ns"` // node receive time (handler entry)
+	T3UnixNS int64                `json:"t3_unix_ns"` // node transmit time (just before write)
+	Server   *timesync.ServerInfo `json:"server,omitempty"`
+}
+
+// handleTime serves the GET /time handshake. Open read endpoint (LAN
+// trust, same posture as /health). Deliberately does no probing or
+// allocation between the t2 and t3 stamps so the round-trip the caller
+// measures is dominated by the network path, not agent work.
+func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
+	t2 := time.Now().UnixNano()
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var t1 int64
+	if q := r.URL.Query().Get("t1"); q != "" {
+		// Best-effort: a malformed t1 echoes 0 rather than erroring — the
+		// caller can detect the miss and retry, and t2/t3 are still useful.
+		t1, _ = strconv.ParseInt(q, 10, 64)
+	}
+	// Cheap RLock read of the cached probe (no network) — nil-safe when
+	// timesync.server is unset.
+	server := s.reporter.TimeServer.Snapshot()
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := timeResp{T1UnixNS: t1, T2UnixNS: t2, Server: server}
+	resp.T3UnixNS = time.Now().UnixNano()
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type unloadReq struct {

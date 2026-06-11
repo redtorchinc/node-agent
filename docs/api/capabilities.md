@@ -18,6 +18,7 @@ rely on without parsing semver.
   "rdma_available": true,
   "training_mode_supported": true,
   "metrics_enabled": true,
+  "time_handshake_supported": true,
   "system_metrics_fields_supported": [
     "cpu.usage_pct", "cpu.usage_per_core_pct", "cpu.load_1m",
     "memory.unified", "memory.pressure", "memory.huge_pages_total",
@@ -34,6 +35,10 @@ rely on without parsing semver.
 - `training_mode_supported` is `true` on every OS — the state machine is
   cross-platform. The endpoint will still 503 if the host can't actually
   drain Ollama (e.g. no Ollama running).
+- `time_handshake_supported` is `true` from v0.2.14 on — the node serves
+  `GET /time` (the caller↔node NTP-style offset handshake). When `false`
+  (older agents), fall back to `time_sync.now_unix_ns` + the caller's own
+  RTT/2. See [time.md](time.md).
 - `services_allowlist` lists exactly what `POST /actions/service` will
   accept. Anything outside this list returns 403.
 - `system_metrics_fields_supported` is the canonical list of `/health`

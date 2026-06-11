@@ -14,17 +14,22 @@ import (
 //
 // Read-only, no auth (LAN open) — same trust posture as /health.
 type Capabilities struct {
-	AgentVersion                  string   `json:"agent_version"`
-	ConfigVersion                 int      `json:"config_version"`
-	OS                            string   `json:"os"`
-	Arch                          string   `json:"arch"`
-	PlatformsSupported            []string `json:"platforms_supported"`
-	ActionsSupported              []string `json:"actions_supported"`
-	ServicesAllowlist             []string `json:"services_allowlist"`
-	RDMAAvailable                 bool     `json:"rdma_available"`
-	TrainingModeSupported         bool     `json:"training_mode_supported"`
-	MetricsEnabled                bool     `json:"metrics_enabled"`
-	SystemMetricsFieldsSupported  []string `json:"system_metrics_fields_supported"`
+	AgentVersion          string   `json:"agent_version"`
+	ConfigVersion         int      `json:"config_version"`
+	OS                    string   `json:"os"`
+	Arch                  string   `json:"arch"`
+	PlatformsSupported    []string `json:"platforms_supported"`
+	ActionsSupported      []string `json:"actions_supported"`
+	ServicesAllowlist     []string `json:"services_allowlist"`
+	RDMAAvailable         bool     `json:"rdma_available"`
+	TrainingModeSupported bool     `json:"training_mode_supported"`
+	MetricsEnabled        bool     `json:"metrics_enabled"`
+	// TimeHandshakeSupported advertises the GET /time NTP-style
+	// four-timestamp endpoint (v0.2.14). Backends key off this to use the
+	// precise caller↔node offset handshake; older nodes lack it and the
+	// backend falls back to time_sync.now_unix_ns + its own RTT/2.
+	TimeHandshakeSupported       bool     `json:"time_handshake_supported"`
+	SystemMetricsFieldsSupported []string `json:"system_metrics_fields_supported"`
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -33,14 +38,15 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := Capabilities{
-		AgentVersion:       buildinfo.Version,
-		ConfigVersion:      config.SchemaVersion,
-		OS:                 runtime.GOOS,
-		Arch:               runtime.GOARCH,
-		PlatformsSupported: []string{"ollama", "vllm"},
-		ActionsSupported:   []string{"unload-model", "service", "training-mode"},
-		MetricsEnabled:     s.cfg.MetricsEnabled,
-		TrainingModeSupported: true,
+		AgentVersion:           buildinfo.Version,
+		ConfigVersion:          config.SchemaVersion,
+		OS:                     runtime.GOOS,
+		Arch:                   runtime.GOARCH,
+		PlatformsSupported:     []string{"ollama", "vllm"},
+		ActionsSupported:       []string{"unload-model", "service", "training-mode"},
+		MetricsEnabled:         s.cfg.MetricsEnabled,
+		TrainingModeSupported:  true,
+		TimeHandshakeSupported: true,
 	}
 	// RDMA presence is detected at probe time; the agent advertises support
 	// when the package's runtime check passes. On non-Linux we always

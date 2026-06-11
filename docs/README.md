@@ -12,6 +12,7 @@ read [ARCHITECTURE.md](../ARCHITECTURE.md) first.
 ## API reference
 
 - [api/health.md](api/health.md) — `GET /health`, every field.
+- [api/time.md](api/time.md) — `GET /time`, the caller↔node clock-offset handshake (and the two-offset model).
 - [api/capabilities.md](api/capabilities.md) — `GET /capabilities`, used by the dispatcher for feature detection.
 - [api/version.md](api/version.md) — `GET /version`.
 - [api/metrics.md](api/metrics.md) — `GET /metrics`, Prometheus exposition.
@@ -22,6 +23,7 @@ read [ARCHITECTURE.md](../ARCHITECTURE.md) first.
 ## Topics
 
 - [degraded-reasons.md](degraded-reasons.md) — canonical reason list.
+- [timesync-fleet.md](timesync-fleet.md) — chrony fleet setup + the two clock offsets the agent measures.
 - [remote-actions.md](remote-actions.md) — security model for mutating endpoints.
 - [platforms/ollama.md](platforms/ollama.md) — Ollama probe.
 - [platforms/vllm.md](platforms/vllm.md) — vLLM probe + Prometheus scrape.

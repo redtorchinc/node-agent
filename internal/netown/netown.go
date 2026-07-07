@@ -158,13 +158,19 @@ type Collector struct {
 	// platform-independent.
 	attrHint string
 
-	mu           sync.RWMutex
-	entries      map[key]*entry
-	procCache    map[int32]ProcInfo
-	lastAttempt  time.Time
-	lastOK       time.Time
-	lastErr      error
-	unattributed int // sockets with pid==0 or failed enrichment in last sample
+	mu          sync.RWMutex
+	entries     map[key]*entry
+	procCache   map[int32]ProcInfo
+	lastAttempt time.Time
+	lastOK      time.Time
+	lastErr     error
+	// unresolved: sockets whose pid was known but enrichment failed in the
+	// last sample (process exited mid-sample) — always a partial result.
+	// unowned: sockets the OS reported with pid==0 outside the
+	// kernel-owned states. Whether that is a partial result depends on
+	// privilege — see Status.
+	unresolved int
+	unowned    int
 }
 
 // New returns a Collector using the platform sampler (gopsutil).
@@ -255,7 +261,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 	seen := map[key]bool{}
 	procCache := map[int32]ProcInfo{}
 	procErr := map[int32]bool{}
-	unattributed := 0
+	unresolved, unowned := 0, 0
 
 	// TCP listen ports feed the ingress/egress direction heuristic.
 	listen := map[uint32]bool{}
@@ -277,7 +283,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 			e.item.Live = true
 			e.live = true
 			if r.PID == 0 && !kernelOwned(r) {
-				unattributed++
+				unowned++
 			}
 			continue
 		}
@@ -308,7 +314,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 				}
 			}
 			if procErr[r.PID] {
-				unattributed++
+				unresolved++
 			} else {
 				item.ProcessName = info.Name
 				item.Exe = info.Exe
@@ -321,7 +327,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 				item.ContainerName = info.ContainerName
 			}
 		} else if !kernelOwned(r) {
-			unattributed++
+			unowned++
 		}
 		item.FlowID = flowID(k, nowNS)
 		c.entries[k] = &entry{item: item, live: true}
@@ -338,7 +344,8 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 			delete(c.entries, k)
 		}
 	}
-	c.unattributed = unattributed
+	c.unresolved = unresolved
+	c.unowned = unowned
 }
 
 // Status reports the envelope-level condition of the collector.
@@ -354,13 +361,23 @@ func (c *Collector) Status() Status {
 	if c.lastOK.IsZero() || time.Since(c.lastOK) > staleAfter {
 		st.Stale = true
 	}
-	if c.unattributed > 0 {
+	// A fully-privileged agent that reports pid==0 has hit a kernel-owned
+	// socket (in-kernel NFS/iSCSI client, etc.) — there is no owner to
+	// find, so the result is complete, not partial. Only when privilege
+	// is lacking (attrHint set) do unowned sockets mean missing data.
+	// Enrichment failures (pid known, process gone mid-sample) are always
+	// a partial result.
+	missing := c.unresolved
+	if c.attrHint != "" {
+		missing += c.unowned
+	}
+	if missing > 0 {
 		st.Partial = true
-		msg := fmt.Sprintf("%d socket(s) lack process attribution", c.unattributed)
+		msg := fmt.Sprintf("%d socket(s) lack process attribution", missing)
 		if c.attrHint != "" {
 			msg += ": " + c.attrHint
 		} else {
-			msg += " (agent may lack privilege, or the owning process exited mid-sample)"
+			msg += " (owning process exited mid-sample)"
 		}
 		st.Warnings = append(st.Warnings, msg)
 	}

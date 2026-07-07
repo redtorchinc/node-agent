@@ -167,9 +167,10 @@ func TestStatus_PartialAndStale(t *testing.T) {
 		errs:    []error{nil, errors.New("permission denied")},
 	}
 	c := newTestCollector(t, fs)
+	c.attrHint = "agent lacks CAP_SYS_PTRACE" // unprivileged agent
 	st := c.Status()
 	if !st.Partial {
-		t.Error("unattributed pid=0 socket must set partial")
+		t.Error("unattributed pid=0 socket must set partial on an unprivileged agent")
 	}
 	if st.Stale {
 		t.Error("fresh successful sample must not be stale")
@@ -192,11 +193,13 @@ func TestStatus_KernelOwnedSocketsNotPartial(t *testing.T) {
 	conns := []RawConn{
 		{Proto: "tcp", LocalAddr: "0.0.0.0", LocalPort: 8000, State: "listen", PID: 100},
 		// Kernel-owned states have no owning process by design — even root
-		// sees pid 0. Must not count as an attribution failure.
+		// sees pid 0. Must not count as an attribution failure, whatever
+		// the privilege level.
 		{Proto: "tcp", LocalAddr: "10.0.0.5", LocalPort: 33094, RemoteAddr: "10.0.0.9", RemotePort: 11435, State: "time_wait", PID: 0},
 		{Proto: "tcp", LocalAddr: "10.0.0.5", LocalPort: 8000, RemoteAddr: "10.0.0.9", RemotePort: 52000, State: "syn_recv", PID: 0},
 	}
 	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{conns, conns}})
+	c.attrHint = "agent lacks CAP_SYS_PTRACE" // even unprivileged
 	if st := c.Status(); st.Partial {
 		t.Errorf("kernel-owned pid=0 sockets must not set partial: %+v", st.Warnings)
 	}
@@ -212,25 +215,32 @@ func TestStatus_KernelOwnedSocketsNotPartial(t *testing.T) {
 }
 
 func TestStatus_AttributionHint(t *testing.T) {
+	// testConns carries one pid=0 established socket. On a privileged
+	// agent (attrHint empty) that is a kernel-owned socket — an in-kernel
+	// NFS/iSCSI client, say — and the result is complete, not partial.
 	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{testConns()}})
-	warning := func() string {
-		for _, w := range c.Status().Warnings {
-			if strings.Contains(w, "lack process attribution") {
-				return w
-			}
-		}
-		t.Fatal("expected an attribution warning for the pid=0 socket")
-		return ""
+	if st := c.Status(); st.Partial {
+		t.Errorf("privileged agent: pid=0 socket must not set partial: %+v", st.Warnings)
 	}
-	// NewWithDeps leaves attrHint empty → generic tail.
-	if w := warning(); !strings.Contains(w, "may lack privilege") {
-		t.Errorf("without hint, want generic tail, got %q", w)
-	}
-	// With a hint (set by New via attributionHint on Linux), the warning
-	// names the missing caps and the fix instead of guessing.
+	// Unprivileged (attrHint set by New via attributionHint on Linux):
+	// the same socket means missing data, named precisely.
 	c.attrHint = "agent lacks CAP_SYS_PTRACE — re-run the installer"
-	if w := warning(); !strings.Contains(w, c.attrHint) || strings.Contains(w, "may lack privilege") {
-		t.Errorf("with hint, warning must carry it verbatim, got %q", w)
+	st := c.Status()
+	if !st.Partial || len(st.Warnings) == 0 || !strings.Contains(st.Warnings[0], c.attrHint) {
+		t.Errorf("unprivileged agent: want partial with hint, got %+v", st)
+	}
+}
+
+func TestStatus_EnrichmentFailureAlwaysPartial(t *testing.T) {
+	// PID 999 is not in fakeProcs — enrichment fails as it does when the
+	// process exits mid-sample. Partial regardless of privilege.
+	conns := []RawConn{
+		{Proto: "tcp", LocalAddr: "10.0.0.5", LocalPort: 40000, RemoteAddr: "10.0.0.9", RemotePort: 443, State: "established", PID: 999},
+	}
+	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{conns}})
+	st := c.Status()
+	if !st.Partial || len(st.Warnings) == 0 || !strings.Contains(st.Warnings[0], "exited mid-sample") {
+		t.Errorf("failed enrichment must set partial with the exited-process tail, got %+v", st)
 	}
 }
 

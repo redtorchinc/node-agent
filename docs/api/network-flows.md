@@ -272,9 +272,53 @@ signaling:
 | macOS (Apple Silicon & Intel) | lsof | empty — no cgroup analogue read today |
 | Windows | IP Helper API | empty |
 
-Root (or an elevated service) may be required to attribute sockets owned
-by other users. When attribution is incomplete the agent returns
-`partial: true` plus a warning — it never guesses.
+When attribution is incomplete the agent returns `partial: true` plus a
+warning — it never guesses.
+
+### Privileges (Linux)
+
+The socket-inode → pid join walks other users' `/proc/<pid>/fd` and
+resolves `/proc/<pid>/exe`, which the kernel guards with a ptrace
+access-mode check plus 0500 directory permissions. Running as root
+satisfies both; a non-root agent needs exactly two capabilities:
+
+| Capability | Why |
+|---|---|
+| `CAP_SYS_PTRACE` | passes the `PTRACE_MODE_READ` check on `/proc/<pid>/{fd,exe}` |
+| `CAP_DAC_READ_SEARCH` | bypasses the 0500 mode on other users' proc directories |
+
+As of **v0.3.1** the installer grants these automatically: the systemd
+unit carries
+
+```ini
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+```
+
+whenever the effective config has `network.flows_enabled` ≠ `false`
+(issue #23). Nodes installed with v0.3.0 self-heal on the next one-liner
+upgrade, which re-renders the unit. Flipping `flows_enabled` later
+requires re-running `sudo rt-node-agent install` (idempotent; config and
+token are preserved) — a restart alone does not re-render the unit.
+
+The unit intentionally does **not** set `CapabilityBoundingSet` (it
+would strip the sudo'd `systemctl` used by `POST /actions/service` of
+the root capabilities it needs) — the agent process itself still only
+ever holds the two ambient caps. Operators who manage their own unit
+can apply the same grant as a drop-in:
+
+```ini
+# /etc/systemd/system/rt-node-agent.service.d/network-attribution.conf
+[Service]
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+```
+
+followed by `systemctl daemon-reload && systemctl restart
+rt-node-agent`. When the agent detects the gap at runtime (non-root,
+caps missing), the `partial: true` warning names the missing
+capabilities and points here, and the same hint is logged to the
+journal at startup.
+
+macOS (launchd, root) and Windows (LocalSystem) need no equivalent.
 
 ## Privacy and storage rules
 

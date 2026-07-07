@@ -68,6 +68,21 @@ per-socket workflow attribution — the agent can't know case-manager
 workflow identity). New top-level `network:` config key (surfaced by
 the migrator's missing-top-key detection) and capability flag
 `network_flows_supported`. Contract: docs/api/network-flows.md.
+v0.3.1 makes Linux attribution actually work under the default install
+(issue #23): the systemd unit gains
+`AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH` whenever the
+effective config has `network.flows_enabled` ≠ false (rendered at
+install time — flipping the key needs `sudo rt-node-agent install`,
+not just a restart), and drops `NoNewPrivileges=true`, which had been
+silently breaking the sudo → systemctl path of `POST /actions/service`
+since v0.2.0 (setuid blocked). `CapabilityBoundingSet` is deliberately
+NOT set — it would strip the sudo'd systemctl of root caps; see the
+unitTemplate comment in internal/service/unit_systemd.go. The
+`partial: true` warning on `/network/*` now names the missing caps and
+the fix when the agent detects the gap (`internal/netown/caps_linux.go`
+parses CapEff from /proc/self/status) — warnings[] text is freeform and
+NOT part of the degraded_reasons contract. No wire or config-schema
+change.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading.

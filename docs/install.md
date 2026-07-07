@@ -66,6 +66,14 @@ sudo launchctl kickstart -k system/com.redtorch.rt-node-agent  # macOS
 Restart-Service rt-node-agent  # Windows (elevated PowerShell)
 ```
 
+One exception on Linux: `network.flows_enabled` also gates the
+capability grant (`AmbientCapabilities=CAP_SYS_PTRACE
+CAP_DAC_READ_SEARCH`, v0.3.1+) baked into the systemd unit, and the unit
+is only rendered at install time. After flipping that key, re-run `sudo
+rt-node-agent install` (idempotent — config and token are preserved)
+instead of just restarting. See
+[docs/api/network-flows.md](api/network-flows.md) §Privileges (Linux).
+
 To see what changed across the upgrade:
 
 ```sh

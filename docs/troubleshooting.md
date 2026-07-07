@@ -52,6 +52,33 @@ include.
 
 Reinstalling the agent re-validates and re-writes the drop-in.
 
+Units written by v0.3.0 and earlier also set `NoNewPrivileges=true`,
+which blocks `sudo` entirely (the third command above fails with "the
+'no new privileges' flag is set"). v0.3.1 removed the directive —
+re-run the install one-liner to re-render the unit.
+
+## Linux: /network/* returns `partial: true` / bare tuples
+
+Sockets come back without `pid` / `process_name` / `user` / `service`,
+and `warnings[]` says sockets "lack process attribution". The agent
+(running as `rt-agent`) can't read other users' `/proc/<pid>/fd`, so it
+reports the tuple without guessing the owner (issue #23).
+
+Fix: upgrade to v0.3.1+ and re-run the install one-liner — the unit is
+re-rendered with `AmbientCapabilities=CAP_SYS_PTRACE
+CAP_DAC_READ_SEARCH` whenever `network.flows_enabled` isn't `false`.
+Verify with:
+
+```
+systemctl cat rt-node-agent | grep AmbientCapabilities
+grep CapAmb /proc/$(pgrep -f 'rt-node-agent run')/status
+```
+
+On v0.3.1+ the warning itself names the missing capabilities and the
+same hint appears in the journal at startup. Details and a manual
+drop-in alternative: [docs/api/network-flows.md](api/network-flows.md)
+§Privileges (Linux).
+
 ## /health is slow (>2s)
 
 Most likely a probe is hung. Check:

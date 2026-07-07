@@ -188,6 +188,29 @@ func TestStatus_PartialAndStale(t *testing.T) {
 	}
 }
 
+func TestStatus_AttributionHint(t *testing.T) {
+	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{testConns()}})
+	warning := func() string {
+		for _, w := range c.Status().Warnings {
+			if strings.Contains(w, "lack process attribution") {
+				return w
+			}
+		}
+		t.Fatal("expected an attribution warning for the pid=0 socket")
+		return ""
+	}
+	// NewWithDeps leaves attrHint empty → generic tail.
+	if w := warning(); !strings.Contains(w, "enough privilege") {
+		t.Errorf("without hint, want generic tail, got %q", w)
+	}
+	// With a hint (set by New via attributionHint on Linux), the warning
+	// names the missing caps and the fix instead of guessing.
+	c.attrHint = "agent lacks CAP_SYS_PTRACE — re-run the installer"
+	if w := warning(); !strings.Contains(w, c.attrHint) || strings.Contains(w, "enough privilege") {
+		t.Errorf("with hint, warning must carry it verbatim, got %q", w)
+	}
+}
+
 func TestNormAddr(t *testing.T) {
 	cases := map[string]string{
 		"":                     "",

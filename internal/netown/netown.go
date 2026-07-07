@@ -30,6 +30,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"sort"
@@ -151,6 +152,12 @@ type Collector struct {
 	procs    ProcResolver
 	hostname string
 
+	// attrHint, when non-empty, names the missing privilege behind
+	// unattributed sockets and the fix (Linux caps — see caps_linux.go).
+	// Set by New only; NewWithDeps leaves it empty so tests stay
+	// platform-independent.
+	attrHint string
+
 	mu           sync.RWMutex
 	entries      map[key]*entry
 	procCache    map[int32]ProcInfo
@@ -162,7 +169,9 @@ type Collector struct {
 
 // New returns a Collector using the platform sampler (gopsutil).
 func New(cfg Config) *Collector {
-	return NewWithDeps(cfg, newGopsutilSampler(), newGopsutilProcs())
+	c := NewWithDeps(cfg, newGopsutilSampler(), newGopsutilProcs())
+	c.attrHint = attributionHint()
+	return c
 }
 
 // NewWithDeps injects the sampler and process resolver — the test seam.
@@ -196,6 +205,11 @@ func (c *Collector) WindowS() int { return c.cfg.WindowS }
 // from the server's Run — read endpoints also refresh on demand via
 // SampleIfOlder so the first request after startup isn't blind.
 func (c *Collector) Run(done <-chan struct{}) {
+	if c.attrHint != "" {
+		// Surface the privilege gap in the journal at startup, not only in
+		// response envelopes nobody may be reading yet.
+		slog.Warn("network attribution will be incomplete", "hint", c.attrHint)
+	}
 	t := time.NewTicker(time.Duration(c.cfg.PollIntervalS) * time.Second)
 	defer t.Stop()
 	c.SampleIfOlder(0)
@@ -342,8 +356,13 @@ func (c *Collector) Status() Status {
 	}
 	if c.unattributed > 0 {
 		st.Partial = true
-		st.Warnings = append(st.Warnings, fmt.Sprintf(
-			"%d socket(s) lack process attribution (agent not running with enough privilege?)", c.unattributed))
+		msg := fmt.Sprintf("%d socket(s) lack process attribution", c.unattributed)
+		if c.attrHint != "" {
+			msg += ": " + c.attrHint
+		} else {
+			msg += " (agent not running with enough privilege?)"
+		}
+		st.Warnings = append(st.Warnings, msg)
 	}
 	return st
 }

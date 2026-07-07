@@ -102,6 +102,7 @@ the agent has no public Go API.
 | [internal/services/stub_other.go](internal/services/stub_other.go) | Returns `ErrUnsupported` on macOS/Windows. |
 | [internal/services/healthbridge.go](internal/services/healthbridge.go) | Adapter for `health.ServicesReporter` — keeps `internal/health` free of services imports. |
 | [internal/service/sudoers_linux.go](internal/service/sudoers_linux.go) | Writes `/etc/sudoers.d/rt-node-agent` on install, validated with `visudo -cf`. Pattern: `rt-vllm-[a-zA-Z0-9_-]*.service` only. |
+| [internal/service/unit_systemd.go](internal/service/unit_systemd.go) | v0.3.1: systemd unit rendering, untagged for testability. Grants `AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH` when `network.flows_enabled` ≠ false; deliberately no `NoNewPrivileges`/`CapabilityBoundingSet` (both would break the sudo'd systemctl above). |
 
 ### Training mode
 
@@ -118,6 +119,7 @@ the agent has no public Go API.
 | [internal/netown/cgroup_linux.go](internal/netown/cgroup_linux.go) | `/proc/<pid>/cgroup` → systemd unit + container id (docker/containerd/cri-o/podman patterns). Linux only; no-op elsewhere. |
 | [internal/netown/redact.go](internal/netown/redact.go) | Secret-shaped cmdline redaction (`--flag value`, `--flag=value`, `KEY=value`, `Bearer …`) **before** the `cmdline_max_bytes` truncation. |
 | [internal/netown/resolve.go](internal/netown/resolve.go) | 5-tuple → owner matcher with deterministic per-tier confidence (0.97 exact-live … 0.50 port-only) and ambiguity downgrade. |
+| [internal/netown/caps_linux.go](internal/netown/caps_linux.go) | v0.3.1: parses `CapEff` from `/proc/self/status`; when non-root and missing `CAP_SYS_PTRACE`/`CAP_DAC_READ_SEARCH`, the `partial` warning + startup log name the gap and the fix. No-op elsewhere. |
 
 ### System metrics
 

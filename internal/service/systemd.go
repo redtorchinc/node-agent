@@ -8,37 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/redtorchinc/node-agent/internal/config"
 )
 
-const (
-	systemdUnitPath = "/etc/systemd/system/rt-node-agent.service"
-	agentUser       = "rt-agent"
-	agentGroup      = "rt-agent"
-	configDir       = "/etc/rt-node-agent"
-	logDir          = "/var/log/rt-node-agent"
-)
-
-const unitTemplate = `[Unit]
-Description=RedTorch Node Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=%s run
-Restart=on-failure
-RestartSec=5
-User=%s
-Group=%s
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=%s
-EnvironmentFile=-%s/env
-
-[Install]
-WantedBy=multi-user.target
-`
+const systemdUnitPath = "/etc/systemd/system/rt-node-agent.service"
 
 func install() error {
 	if os.Geteuid() != 0 {
@@ -85,14 +59,35 @@ func install() error {
 		return fmt.Errorf("bootstrap token: %w", err)
 	}
 
-	unit := fmt.Sprintf(unitTemplate, exe, agentUser, agentGroup, logDir, configDir)
+	// Attribution caps follow the effective config (issue #23):
+	// network.flows_enabled defaults to auto (= true), so standard installs
+	// get working /network/* attribution with no manual step; operators who
+	// set flows_enabled: false get a unit with no extra capabilities.
+	// install.sh re-runs this on every upgrade, so flipping the key needs a
+	// re-install (documented in docs/install.md), not just a restart.
+	netCaps := true
+	if cfg, err := config.Load(); err == nil {
+		netCaps = cfg.NetworkFlowsEnabled()
+	} else {
+		fmt.Fprintf(os.Stderr, "warn: could not read config to gate attribution caps (%v); including them\n", err)
+	}
+
+	unit := renderUnit(exe, netCaps)
 	if err := os.WriteFile(systemdUnitPath, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("write unit: %w", err)
 	}
 	if err := run("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := run("systemctl", "enable", "--now", "rt-node-agent"); err != nil {
+	if err := run("systemctl", "enable", "rt-node-agent"); err != nil {
+		return err
+	}
+	// restart, not `enable --now`: --now is a no-op on an already-active
+	// service, which left upgrades running the old binary and unit changes
+	// (the v0.3.1 capability grant) unapplied until a manual restart.
+	// restart also starts a stopped service, so fresh installs behave the
+	// same as before.
+	if err := run("systemctl", "restart", "rt-node-agent"); err != nil {
 		return err
 	}
 	fmt.Println("rt-node-agent installed and started (systemd)")

@@ -188,6 +188,29 @@ func TestStatus_PartialAndStale(t *testing.T) {
 	}
 }
 
+func TestStatus_KernelOwnedSocketsNotPartial(t *testing.T) {
+	conns := []RawConn{
+		{Proto: "tcp", LocalAddr: "0.0.0.0", LocalPort: 8000, State: "listen", PID: 100},
+		// Kernel-owned states have no owning process by design — even root
+		// sees pid 0. Must not count as an attribution failure.
+		{Proto: "tcp", LocalAddr: "10.0.0.5", LocalPort: 33094, RemoteAddr: "10.0.0.9", RemotePort: 11435, State: "time_wait", PID: 0},
+		{Proto: "tcp", LocalAddr: "10.0.0.5", LocalPort: 8000, RemoteAddr: "10.0.0.9", RemotePort: 52000, State: "syn_recv", PID: 0},
+	}
+	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{conns, conns}})
+	if st := c.Status(); st.Partial {
+		t.Errorf("kernel-owned pid=0 sockets must not set partial: %+v", st.Warnings)
+	}
+	// Same on re-sample of existing entries (the other counting branch).
+	c.SampleIfOlder(0)
+	if st := c.Status(); st.Partial {
+		t.Errorf("re-sampled kernel-owned sockets must not set partial: %+v", st.Warnings)
+	}
+	// They still appear in the table — visibility isn't dropped.
+	if got := c.Sockets(SocketFilter{State: "time_wait"}); len(got) != 1 {
+		t.Errorf("time_wait socket must still be listed, got %+v", got)
+	}
+}
+
 func TestStatus_AttributionHint(t *testing.T) {
 	c := newTestCollector(t, &fakeSampler{samples: [][]RawConn{testConns()}})
 	warning := func() string {
@@ -200,13 +223,13 @@ func TestStatus_AttributionHint(t *testing.T) {
 		return ""
 	}
 	// NewWithDeps leaves attrHint empty → generic tail.
-	if w := warning(); !strings.Contains(w, "enough privilege") {
+	if w := warning(); !strings.Contains(w, "may lack privilege") {
 		t.Errorf("without hint, want generic tail, got %q", w)
 	}
 	// With a hint (set by New via attributionHint on Linux), the warning
 	// names the missing caps and the fix instead of guessing.
 	c.attrHint = "agent lacks CAP_SYS_PTRACE — re-run the installer"
-	if w := warning(); !strings.Contains(w, c.attrHint) || strings.Contains(w, "enough privilege") {
+	if w := warning(); !strings.Contains(w, c.attrHint) || strings.Contains(w, "may lack privilege") {
 		t.Errorf("with hint, warning must carry it verbatim, got %q", w)
 	}
 }

@@ -63,7 +63,11 @@ Every response carries:
 - `partial: true` — usable data, but part of the result lacked
   permission or platform support (e.g. sockets owned by other users when
   the agent is not root). `warnings[]` says what was dropped. Missing
-  fields are omitted, never fabricated.
+  fields are omitted, never fabricated. Kernel-owned sockets
+  (`time_wait`, `syn_recv`) are still listed but never counted here —
+  no process holds them, so pid-less is their correct shape, not a
+  privilege gap (v0.3.1; earlier versions flagged `partial: true` on
+  any node with connection churn).
 - `training_run_id` — present only while the node is in training mode
   (the `run_id` from `POST /actions/training-mode`). This is the
   backend's temporal-join key: "flows observed while run X was active."

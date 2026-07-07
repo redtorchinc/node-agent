@@ -276,7 +276,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 			e.item.LastSeenNS = nowNS
 			e.item.Live = true
 			e.live = true
-			if r.PID == 0 {
+			if r.PID == 0 && !kernelOwned(r) {
 				unattributed++
 			}
 			continue
@@ -320,7 +320,7 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 				item.ContainerID = info.ContainerID
 				item.ContainerName = info.ContainerName
 			}
-		} else {
+		} else if !kernelOwned(r) {
 			unattributed++
 		}
 		item.FlowID = flowID(k, nowNS)
@@ -360,7 +360,7 @@ func (c *Collector) Status() Status {
 		if c.attrHint != "" {
 			msg += ": " + c.attrHint
 		} else {
-			msg += " (agent not running with enough privilege?)"
+			msg += " (agent may lack privilege, or the owning process exited mid-sample)"
 		}
 		st.Warnings = append(st.Warnings, msg)
 	}
@@ -472,6 +472,16 @@ func capSockets(s []SocketItem, limit int) []SocketItem {
 		return s[:limit]
 	}
 	return s
+}
+
+// kernelOwned reports whether a socket in this state never has an owning
+// process: after the fd closes (time_wait) or before accept(2) creates
+// one (syn_recv), the kernel holds the socket alone, so pid==0 there is
+// structural — even root sees no owner. Counting these as unattributed
+// kept `partial: true` permanently on any node with connection churn
+// and pointed operators at a privilege problem that didn't exist.
+func kernelOwned(r RawConn) bool {
+	return r.Proto == "tcp" && (r.State == "time_wait" || r.State == "syn_recv")
 }
 
 // direction classifies a socket at first sight. Sampling can't observe

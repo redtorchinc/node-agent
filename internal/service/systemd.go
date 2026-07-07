@@ -79,7 +79,15 @@ func install() error {
 	if err := run("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := run("systemctl", "enable", "--now", "rt-node-agent"); err != nil {
+	if err := run("systemctl", "enable", "rt-node-agent"); err != nil {
+		return err
+	}
+	// restart, not `enable --now`: --now is a no-op on an already-active
+	// service, which left upgrades running the old binary and unit changes
+	// (the v0.3.1 capability grant) unapplied until a manual restart.
+	// restart also starts a stopped service, so fresh installs behave the
+	// same as before.
+	if err := run("systemctl", "restart", "rt-node-agent"); err != nil {
 		return err
 	}
 	fmt.Println("rt-node-agent installed and started (systemd)")

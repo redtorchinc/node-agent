@@ -81,8 +81,14 @@ unitTemplate comment in internal/service/unit_systemd.go. The
 `partial: true` warning on `/network/*` now names the missing caps and
 the fix when the agent detects the gap (`internal/netown/caps_linux.go`
 parses CapEff from /proc/self/status) — warnings[] text is freeform and
-NOT part of the degraded_reasons contract. No wire or config-schema
-change.
+NOT part of the degraded_reasons contract. Two more fixes shaken out by
+on-node verification: `install()` now does `systemctl enable` +
+`restart` instead of `enable --now` (which is a no-op on an active
+service — upgrades had kept the OLD binary and unit running until a
+manual restart), and kernel-owned sockets (`time_wait` / `syn_recv`,
+which no process holds — even root sees pid 0) no longer count toward
+`partial`, which connection churn had been pinning permanently true.
+No wire or config-schema change.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading.

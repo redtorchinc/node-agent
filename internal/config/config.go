@@ -36,8 +36,9 @@ type Config struct {
 	// Platforms.Ollama.Endpoint when set.
 	Platforms PlatformsConfig `yaml:"platforms"`
 
-	// OllamaEndpoint is the v0.1.x location; deprecated, scheduled for
-	// removal in v0.3.0. Still loaded so existing configs work.
+	// OllamaEndpoint is the v0.1.x location; deprecated. Still loaded so
+	// existing configs work — removal deferred until a release where
+	// breaking v0.1.x configs is acceptable.
 	OllamaEndpoint string `yaml:"ollama_endpoint"`
 
 	ServiceAllocators []allocators.ServiceConfig `yaml:"service_allocators"`
@@ -48,6 +49,30 @@ type Config struct {
 	TrainingMode TrainingModeConfig `yaml:"training_mode"`
 	RDMA         RDMAConfig         `yaml:"rdma"`
 	TimeSync     TimeSyncConfig     `yaml:"timesync"`
+	Network      NetworkConfig      `yaml:"network"`
+}
+
+// NetworkConfig configures the /network/* flow-ownership surface
+// (v0.3.0). All three endpoints are Bearer-gated — unlike the other read
+// endpoints, a socket inventory with cmdlines and peer maps is recon
+// material, so it rides the same token as /actions/*.
+type NetworkConfig struct {
+	// FlowsEnabled: "auto" (default, equivalent to true), "true", "false".
+	// false skips route registration entirely and capabilities reports
+	// network_flows_supported: false.
+	FlowsEnabled string `yaml:"flows_enabled"`
+
+	// PollIntervalS is the background socket-table sample cadence.
+	// Default 10. Read requests also refresh on demand (throttled to 2s)
+	// so /network/resolve stays near-real-time between polls.
+	PollIntervalS int `yaml:"poll_interval_s"`
+
+	// WindowS is how long closed sockets are retained for late-arriving
+	// NetFlow correlation. Default 300.
+	WindowS int `yaml:"window_s"`
+
+	// CmdlineMaxBytes caps cmdline_head after secret redaction. Default 240.
+	CmdlineMaxBytes int `yaml:"cmdline_max_bytes"`
 }
 
 // TimeSyncConfig configures the agent's own NTP probe surfaced under
@@ -150,6 +175,12 @@ func Defaults() Config {
 		TimeSync: TimeSyncConfig{
 			Server:           "time.cloudflare.com",
 			OffsetDegradedMS: 100,
+		},
+		Network: NetworkConfig{
+			FlowsEnabled:    "auto",
+			PollIntervalS:   10,
+			WindowS:         300,
+			CmdlineMaxBytes: 240,
 		},
 	}
 }
@@ -346,4 +377,23 @@ func normalize(c *Config) {
 	if c.RDMA.ErrorsGrowingWindowS == 0 {
 		c.RDMA.ErrorsGrowingWindowS = 60
 	}
+	if c.Network.FlowsEnabled == "" {
+		c.Network.FlowsEnabled = "auto"
+	}
+	if c.Network.PollIntervalS == 0 {
+		c.Network.PollIntervalS = 10
+	}
+	if c.Network.WindowS == 0 {
+		c.Network.WindowS = 300
+	}
+	if c.Network.CmdlineMaxBytes == 0 {
+		c.Network.CmdlineMaxBytes = 240
+	}
+}
+
+// NetworkFlowsEnabled reports whether the /network/* surface is on.
+// "auto" and "true" both enable — gopsutil covers every OS in the build
+// matrix, so auto has nothing to probe.
+func (c Config) NetworkFlowsEnabled() bool {
+	return c.Network.FlowsEnabled != "false"
 }

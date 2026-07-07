@@ -16,6 +16,7 @@ read [ARCHITECTURE.md](../ARCHITECTURE.md) first.
 - [api/capabilities.md](api/capabilities.md) — `GET /capabilities`, used by the dispatcher for feature detection.
 - [api/version.md](api/version.md) — `GET /version`.
 - [api/metrics.md](api/metrics.md) — `GET /metrics`, Prometheus exposition.
+- [api/network-flows.md](api/network-flows.md) — `GET /network/{sockets,flows,resolve}` (Bearer), gateway NetFlow → local process/service owner.
 - [api/actions-unload-model.md](api/actions-unload-model.md) — `POST /actions/unload-model`.
 - [api/actions-service.md](api/actions-service.md) — `POST /actions/service` (start/stop vLLM units).
 - [api/actions-training-mode.md](api/actions-training-mode.md) — `POST /actions/training-mode`.

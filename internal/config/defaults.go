@@ -57,7 +57,8 @@ platforms:
     required: false
 
 # Legacy Ollama endpoint (kept for v0.1.x compatibility; new configs should
-# set platforms.ollama.endpoint above). Removed in v0.3.0.
+# set platforms.ollama.endpoint above). Deprecated; will be removed in a
+# future major cleanup.
 # ollama_endpoint: http://localhost:11434
 
 # Disk paths to surface under /health.disk[]. Defaults: /, /var/lib/ollama,
@@ -134,4 +135,17 @@ service_allocators:
 timesync:
   server: time.cloudflare.com
   offset_degraded_ms: 100
+
+# Network flow ownership (v0.3.0) — GET /network/{sockets,flows,resolve}.
+# Read-only but BEARER-GATED (same token as /actions/*): socket inventories
+# with command lines and peer maps are recon material. Command lines are
+# secret-redacted before emission, then capped at cmdline_max_bytes.
+# ` + "`flows_enabled: false`" + ` unregisters the routes entirely and
+# /capabilities reports network_flows_supported: false.
+# See docs/api/network-flows.md for the wire contract.
+network:
+  flows_enabled: auto      # auto (= true) | true | false
+  poll_interval_s: 10      # background socket-table sample cadence
+  window_s: 300            # retention for closed sockets (late NetFlow joins)
+  cmdline_max_bytes: 240   # cmdline_head cap, applied after redaction
 `

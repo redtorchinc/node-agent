@@ -135,6 +135,26 @@ See [api/time.md](api/time.md) for the two-offset model and the
 caller↔node handshake. Works on every OS (NTP is UDP); the OS-sync-daemon
 fields (`source`/`skew_ms`) are Linux/macOS-only.
 
+## `network`
+
+```yaml
+network:
+  flows_enabled: auto      # auto (= true) | true | false
+  poll_interval_s: 10      # background socket-table sample cadence
+  window_s: 300            # retention for closed sockets (late NetFlow joins)
+  cmdline_max_bytes: 240   # cmdline_head cap, applied after redaction
+```
+
+Controls the v0.3.0 flow-ownership surface
+(`GET /network/{sockets,flows,resolve}`) — read-only but **Bearer-gated**
+with the same token as `/actions/*`, because socket inventories with
+command lines and peer maps are reconnaissance material. Command-line
+values of secret-shaped keys are redacted before the byte cap is applied.
+`flows_enabled: false` unregisters the routes (404) and
+`/capabilities.network_flows_supported` reports `false`. Works on every
+OS; service-unit / container attribution is Linux-only. Full contract:
+[api/network-flows.md](api/network-flows.md).
+
 ## Environment variables (override file)
 
 | Variable | Maps to |

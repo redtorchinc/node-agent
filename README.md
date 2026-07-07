@@ -52,9 +52,9 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 | `GET /capabilities` | none (LAN) | What this build can do on this OS — used by the dispatcher for feature detection. |
 | `GET /version` | none (LAN) | Version / git SHA / build time. |
 | `GET /metrics` | none (LAN) | Prometheus text format (behind `metrics_enabled: true`). |
-| `GET /network/sockets` | none (LAN) | Proposed current socket inventory with PID/process/service/container ownership for gateway correlation. |
-| `GET /network/flows` | none (LAN) | Proposed recent host-local flow ownership window for case-manager and gateway joins. |
-| `GET /network/resolve` | none (LAN) | Proposed targeted 5-tuple resolver from gateway NetFlow to local PID/process/workflow owner. |
+| `GET /network/sockets` | Bearer | Current socket inventory with PID/process/service ownership for gateway correlation (v0.3.0; `network_flows_supported` capability). |
+| `GET /network/flows` | Bearer | Rolling window of live + recently-closed socket ownership for joining against gateway NetFlow. |
+| `GET /network/resolve` | Bearer | One gateway 5-tuple → best local owner, with deterministic per-tier confidence. |
 | `POST /actions/unload-model` | Bearer | Free an Ollama model. |
 | `POST /actions/service` | Bearer | Start/stop/restart allowlisted systemd units (typically `rt-vllm-*.service`). |
 | `POST /actions/training-mode` | Bearer | Coordinate inference ↔ training transitions. |

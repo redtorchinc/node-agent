@@ -66,6 +66,7 @@ the agent has no public Go API.
 | [internal/server/services_handler.go](internal/server/services_handler.go) | `POST /actions/service`. Maps typed errors from `internal/services` to HTTP codes. |
 | [internal/server/training_handler.go](internal/server/training_handler.go) | `POST /actions/training-mode`. Drains Ollama before entering training-mode (fails closed on unload failure). |
 | [internal/server/rdma_avail_{linux,other}.go](internal/server/) | Tiny per-OS shim so `/capabilities` can advertise RDMA availability without importing `internal/rdma` directly. |
+| [internal/server/network_handlers.go](internal/server/network_handlers.go) | `GET /network/{sockets,flows,resolve}` (v0.3.0) — query parsing, common envelope (incl. `training_run_id`), Bearer-gated route registration. |
 
 ### `/health` composition + degraded evaluation
 
@@ -107,6 +108,16 @@ the agent has no public Go API.
 | Path | Role |
 |---|---|
 | [internal/mode/mode.go](internal/mode/mode.go) | State machine (`idle` / `inference` / `training_mode`). Persisted JSON state file at `/var/lib/rt-node-agent/training_mode.json`. Auto-recovery on `entered_at + expected + grace` expiry. |
+
+### Network flow ownership (v0.3.0)
+
+| Path | Role |
+|---|---|
+| [internal/netown/netown.go](internal/netown/netown.go) | Collector: samples the socket table (background poll + on-demand refresh), keeps a rolling window of live + recently-closed sockets keyed by 5-tuple+pid, filters for `/sockets` and `/flows`. `Sampler`/`ProcResolver` interfaces are the test seam. |
+| [internal/netown/sampler_gopsutil.go](internal/netown/sampler_gopsutil.go) | gopsutil-backed sampler + PID enrichment — procfs on Linux, `lsof` on macOS, IP Helper on Windows. No new dependency. |
+| [internal/netown/cgroup_linux.go](internal/netown/cgroup_linux.go) | `/proc/<pid>/cgroup` → systemd unit + container id (docker/containerd/cri-o/podman patterns). Linux only; no-op elsewhere. |
+| [internal/netown/redact.go](internal/netown/redact.go) | Secret-shaped cmdline redaction (`--flag value`, `--flag=value`, `KEY=value`, `Bearer …`) **before** the `cmdline_max_bytes` truncation. |
+| [internal/netown/resolve.go](internal/netown/resolve.go) | 5-tuple → owner matcher with deterministic per-tier confidence (0.97 exact-live … 0.50 port-only) and ambiguity downgrade. |
 
 ### System metrics
 

@@ -8,6 +8,7 @@ units.
 **Authoritative docs:** [spec/SPEC.md](./spec/SPEC.md) (wire contract) ·
 [ARCHITECTURE.md](./ARCHITECTURE.md) (project map) ·
 [spec/V0_2_0_PLAN.md](./spec/V0_2_0_PLAN.md) (v0.2.0 design) ·
+[docs/api/network-flows.md](./docs/api/network-flows.md) (network flow ownership API) ·
 [docs/](./docs/) (operator reference).
 
 ## Install
@@ -51,11 +52,15 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 | `GET /capabilities` | none (LAN) | What this build can do on this OS — used by the dispatcher for feature detection. |
 | `GET /version` | none (LAN) | Version / git SHA / build time. |
 | `GET /metrics` | none (LAN) | Prometheus text format (behind `metrics_enabled: true`). |
+| `GET /network/sockets` | Bearer | Current socket inventory with PID/process/service ownership for gateway correlation (v0.3.0; `network_flows_supported` capability). |
+| `GET /network/flows` | Bearer | Rolling window of live + recently-closed socket ownership for joining against gateway NetFlow. |
+| `GET /network/resolve` | Bearer | One gateway 5-tuple → best local owner, with deterministic per-tier confidence. |
 | `POST /actions/unload-model` | Bearer | Free an Ollama model. |
 | `POST /actions/service` | Bearer | Start/stop/restart allowlisted systemd units (typically `rt-vllm-*.service`). |
 | `POST /actions/training-mode` | Bearer | Coordinate inference ↔ training transitions. |
 
-Field-by-field docs: [docs/api/](docs/api/). Security model:
+Field-by-field docs: [docs/api/](docs/api/). Network flow ownership spec:
+[docs/api/network-flows.md](docs/api/network-flows.md). Security model:
 [docs/remote-actions.md](docs/remote-actions.md).
 
 ## Configuration

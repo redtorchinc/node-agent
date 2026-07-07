@@ -70,7 +70,7 @@ Listen port: **11435** (configurable via env `RT_AGENT_PORT`). Deliberately adja
 
 Bind: `0.0.0.0` by default (LAN); overridable via `RT_AGENT_BIND`.
 
-Auth: shared secret via `Authorization: Bearer <token>` header on mutating endpoints only. Read-only endpoints are open on the LAN (matches air-gapped OPSEC model). Secret lives in `RT_AGENT_TOKEN` env var or `/etc/rt-node-agent/token` file.
+Auth: shared secret via `Authorization: Bearer <token>` header on mutating endpoints, and on the read-only `/network/*` surface (v0.3.0 — a socket inventory with cmdlines and peer maps is recon material, unlike the other read endpoints). All other read-only endpoints are open on the LAN (matches air-gapped OPSEC model). Secret lives in `RT_AGENT_TOKEN` env var or `/etc/rt-node-agent/token` file.
 
 ### `GET /health`
 
@@ -284,6 +284,36 @@ Prometheus text format. Same data as `/health`, flat. Optional — behind `RT_AG
 {"version": "0.1.0", "git_sha": "abc1234", "build_time": "2026-04-22T10:00:00Z"}
 ```
 
+### `GET /network/{sockets,flows,resolve}` (v0.3.0 — flow ownership)
+
+Read-only, **Bearer-gated** (same token as `/actions/*`). Maps
+gateway-observed NetFlow/IPFIX tuples to the local process, user, and
+service unit owning the socket, so the backend can attribute traffic to
+workloads instead of bare host IPs. Full wire contract with shapes,
+match-confidence tiers, redaction rules, and platform notes:
+[docs/api/network-flows.md](../docs/api/network-flows.md).
+
+- `/network/sockets` — current sockets with owner metadata (pid, process,
+  cmdline_head after secret redaction, user, systemd unit / container id
+  from cgroup on Linux).
+- `/network/flows` — rolling window (default 300s) of live **and
+  recently-closed** sockets, so late-arriving NetFlow records still
+  resolve. Ownership only — no byte/packet counters in this slice (the
+  field names are reserved; they'd need netlink `inet_diag`).
+- `/network/resolve?proto=&local_addr=&local_port=&remote_addr=&remote_port=` —
+  one 5-tuple → best owner with deterministic per-tier confidence
+  (`0.97` exact-live … `0.50` port-only; `not_found` is HTTP 200).
+
+Envelope carries `training_run_id` when training mode is active — the
+backend's temporal-join key. There is deliberately **no per-socket
+workflow attribution**: the agent cannot know case-manager workflow
+identity (pull-based, never talks to the backend).
+
+Feature detection: `/capabilities.network_flows_supported`. Config:
+`network.flows_enabled: auto|true|false` plus `poll_interval_s`,
+`window_s`, `cmdline_max_bytes` (docs/config.md). Disabled ⇒ routes not
+registered (404, same as pre-v0.3.0 agents) and capability `false`.
+
 ### `POST /actions/unload-model`
 
 Request (requires Bearer token):
@@ -311,6 +341,7 @@ Deliberately not in v1. Restarting ollama mid-inference loses user work. Require
 - **LAN-only** by default; bind override allowed but documented as opt-in risk.
 - Read endpoints (`/health`, `/metrics`, `/version`) open on LAN — matches air-gapped OPSEC. No PII, no case data ever flows through this agent.
 - Mutating endpoints (`/actions/*`) require shared-secret Bearer token. Rotated by writing a new `/etc/rt-node-agent/token` + `systemctl restart rt-node-agent`.
+- The read-only `/network/*` surface (v0.3.0) also requires the Bearer token — process/socket inventories with command lines and peer maps are reconnaissance material. Command lines are secret-redacted before emission (see docs/api/network-flows.md §Privacy).
 - TLS: deferred to v2. Nodes are on the trusted LAN behind the same firewall as the backend. If this ever ships to a non-air-gapped environment, switch to mTLS before exposing beyond LAN.
 - No remote shell, no arbitrary command execution, no file read/write endpoints. Ever.
 

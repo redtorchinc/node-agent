@@ -56,7 +56,21 @@ unreachable default `time.cloudflare.com` while its OS clock was
 disciplined by an internal NTP server. Also darwin `probeOSSync` now
 queries the **configured** `timesync.server` (falling back to
 `time.apple.com` only when unset) and parses the sntp offset into
-`skew_ms` instead of dropping it.
+`skew_ms` instead of dropping it. **v0.3.0** ships the network flow
+ownership surface (issue #21): Bearer-gated
+`GET /network/{sockets,flows,resolve}` mapping gateway NetFlow tuples
+to local pid/process/user/systemd-unit owners via `internal/netown`
+(gopsutil socket table + `/proc/<pid>/cgroup` parse; ownership only —
+no byte counters, which would need netlink inet_diag). Cmdlines are
+secret-redacted before the 240-byte cap; responses carry
+`training_run_id` for backend temporal joins (deliberately no
+per-socket workflow attribution — the agent can't know case-manager
+workflow identity). New top-level `network:` config key (surfaced by
+the migrator's missing-top-key detection) and capability flag
+`network_flows_supported`. Contract: docs/api/network-flows.md.
+Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
+v0.3.0 despite older comments promising that — removal stays deferred
+so v0.1.x configs keep loading.
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

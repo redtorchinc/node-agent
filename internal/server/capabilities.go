@@ -28,7 +28,12 @@ type Capabilities struct {
 	// four-timestamp endpoint (v0.2.14). Backends key off this to use the
 	// precise caller↔node offset handshake; older nodes lack it and the
 	// backend falls back to time_sync.now_unix_ns + its own RTT/2.
-	TimeHandshakeSupported       bool     `json:"time_handshake_supported"`
+	TimeHandshakeSupported bool `json:"time_handshake_supported"`
+	// NetworkFlowsSupported advertises the Bearer-gated /network/* flow
+	// ownership surface (v0.3.0): /network/sockets, /network/flows,
+	// /network/resolve. False when network.flows_enabled: false — the
+	// routes aren't registered at all in that case.
+	NetworkFlowsSupported        bool     `json:"network_flows_supported"`
 	SystemMetricsFieldsSupported []string `json:"system_metrics_fields_supported"`
 }
 
@@ -47,6 +52,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		MetricsEnabled:         s.cfg.MetricsEnabled,
 		TrainingModeSupported:  true,
 		TimeHandshakeSupported: true,
+		NetworkFlowsSupported:  s.netown != nil,
 	}
 	// RDMA presence is detected at probe time; the agent advertises support
 	// when the package's runtime check passes. On non-Linux we always

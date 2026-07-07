@@ -16,6 +16,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/config"
 	"github.com/redtorchinc/node-agent/internal/health"
 	"github.com/redtorchinc/node-agent/internal/mode"
+	"github.com/redtorchinc/node-agent/internal/netown"
 	"github.com/redtorchinc/node-agent/internal/ollama"
 	"github.com/redtorchinc/node-agent/internal/services"
 )
@@ -27,6 +28,7 @@ type Server struct {
 	ollama   *ollama.Client
 	svcMgr   services.Manager
 	modeMgr  *mode.Manager
+	netown   *netown.Collector // nil when network.flows_enabled: false
 	http     *http.Server
 }
 
@@ -38,6 +40,13 @@ func New(cfg config.Config, reporter *health.Reporter) *Server {
 		ollama:   reporter.Ollama,
 		svcMgr:   services.FromConfig(cfg.Services),
 		modeMgr:  mode.New(cfg.TrainingMode.StateFile, int64(cfg.TrainingMode.GracePeriodS)),
+	}
+	if cfg.NetworkFlowsEnabled() {
+		s.netown = netown.New(netown.Config{
+			PollIntervalS:   cfg.Network.PollIntervalS,
+			WindowS:         cfg.Network.WindowS,
+			CmdlineMaxBytes: cfg.Network.CmdlineMaxBytes,
+		})
 	}
 	// Restore any persisted training-mode state from disk. Safe to call
 	// before serving — if state is stale (expected_duration + grace
@@ -74,6 +83,9 @@ func (s *Server) Addr() string {
 func (s *Server) Run(ctx context.Context) error {
 	// Start background scrapers before accepting traffic.
 	s.reporter.StartBackground(ctx)
+	if s.netown != nil {
+		go s.netown.Run(ctx.Done())
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -107,6 +119,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/time", s.handleTime)
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/capabilities", s.handleCapabilities)
+	// /network/* is read-only but Bearer-gated: socket inventories with
+	// cmdlines and peer maps are recon material, unlike /health's gauges.
+	if s.netown != nil {
+		mux.HandleFunc("/network/sockets", s.requireToken(s.handleNetworkSockets))
+		mux.HandleFunc("/network/flows", s.requireToken(s.handleNetworkFlows))
+		mux.HandleFunc("/network/resolve", s.requireToken(s.handleNetworkResolve))
+	}
 	mux.HandleFunc("/actions/unload-model", s.requireToken(s.handleUnload))
 	mux.HandleFunc("/actions/service", s.requireToken(s.handleServiceAction))
 	mux.HandleFunc("/actions/training-mode", s.requireToken(s.handleTrainingMode))
@@ -124,5 +143,6 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintln(w, "rt-node-agent — see SPEC.md and docs/")
 	fmt.Fprintln(w, "read:    GET /health, GET /time, GET /version, GET /capabilities, GET /metrics")
+	fmt.Fprintln(w, "network: GET /network/sockets, GET /network/flows, GET /network/resolve (Bearer)")
 	fmt.Fprintln(w, "actions: POST /actions/unload-model, POST /actions/service")
 }

@@ -42,6 +42,9 @@ func (gopsutilSampler) Sample() ([]RawConn, error) {
 			PID:        c.Pid,
 		})
 	}
+	if runtime.GOOS == "darwin" {
+		out = mergeRawConns(out, sampleDarwinNetstatTCP())
+	}
 	return out, nil
 }
 
@@ -50,7 +53,7 @@ func (gopsutilSampler) Source() string {
 	case "linux":
 		return "procfs"
 	case "darwin":
-		return "lsof"
+		return "lsof+netstat"
 	case "windows":
 		return "iphlpapi"
 	default:

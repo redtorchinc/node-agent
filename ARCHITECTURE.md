@@ -115,7 +115,7 @@ the agent has no public Go API.
 | Path | Role |
 |---|---|
 | [internal/netown/netown.go](internal/netown/netown.go) | Collector: samples the socket table (background poll + on-demand refresh), keeps a rolling window of live + recently-closed sockets keyed by 5-tuple+pid, filters for `/sockets` and `/flows`. `Sampler`/`ProcResolver` interfaces are the test seam. |
-| [internal/netown/sampler_gopsutil.go](internal/netown/sampler_gopsutil.go) | gopsutil-backed sampler + PID enrichment — procfs on Linux, `lsof` on macOS, IP Helper on Windows. No new dependency. |
+| [internal/netown/sampler_gopsutil.go](internal/netown/sampler_gopsutil.go) | gopsutil-backed sampler + PID enrichment — procfs on Linux, `lsof` plus `netstat -anv -p tcp` on macOS for short-lived pending connects, IP Helper on Windows. No new dependency. |
 | [internal/netown/cgroup_linux.go](internal/netown/cgroup_linux.go) | `/proc/<pid>/cgroup` → systemd unit + container id (docker/containerd/cri-o/podman patterns). Linux only; no-op elsewhere. |
 | [internal/netown/redact.go](internal/netown/redact.go) | Secret-shaped cmdline redaction (`--flag value`, `--flag=value`, `KEY=value`, `Bearer …`) **before** the `cmdline_max_bytes` truncation. |
 | [internal/netown/resolve.go](internal/netown/resolve.go) | 5-tuple → owner matcher with deterministic per-tier confidence (0.97 exact-live … 0.50 port-only) and ambiguity downgrade. |

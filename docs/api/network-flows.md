@@ -56,8 +56,8 @@ Every response carries:
 }
 ```
 
-- `source` — the data path on this OS: `procfs` (Linux), `lsof` (macOS),
-  `iphlpapi` (Windows).
+- `source` — the data path on this OS: `procfs` (Linux), `lsof+netstat`
+  (macOS), `iphlpapi` (Windows).
 - `stale: true` — the most recent socket-table sample failed or is older
   than 3× `poll_interval_s`; entries reflect the last good sample.
 - `partial: true` — usable data, but part of the result lacked
@@ -278,7 +278,7 @@ signaling:
 | OS | Socket source | `service` / `container` / `cgroup` |
 |---|---|---|
 | Linux / DGX | procfs | systemd unit + container id parsed from `/proc/<pid>/cgroup` |
-| macOS (Apple Silicon & Intel) | lsof | empty — no cgroup analogue read today |
+| macOS (Apple Silicon & Intel) | lsof + netstat | empty — no cgroup analogue read today |
 | Windows | IP Helper API | empty |
 
 When attribution is incomplete the agent returns `partial: true` plus a

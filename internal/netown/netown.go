@@ -49,13 +49,14 @@ type Config struct {
 // RawConn is one OS-observed socket, normalized by a Sampler. Neutral
 // struct so tests can feed synthetic samples without gopsutil types.
 type RawConn struct {
-	Proto      string // "tcp" | "udp"
-	LocalAddr  string
-	LocalPort  uint32
-	RemoteAddr string
-	RemotePort uint32
-	State      string // lowercase ("established", "listen", "" for udp)
-	PID        int32  // 0 = unknown owner
+	Proto       string // "tcp" | "udp"
+	LocalAddr   string
+	LocalPort   uint32
+	RemoteAddr  string
+	RemotePort  uint32
+	State       string // lowercase ("established", "listen", "" for udp)
+	PID         int32  // 0 = unknown owner
+	ProcessName string // optional sampler-provided fallback when PID enrichment races process exit
 }
 
 // Sampler produces the current socket table. Implemented by
@@ -137,12 +138,12 @@ type entry struct {
 }
 
 type key struct {
-	proto  string
-	laddr  string
-	lport  uint32
-	raddr  string
-	rport  uint32
-	pid    int32
+	proto string
+	laddr string
+	lport uint32
+	raddr string
+	rport uint32
+	pid   int32
 }
 
 // Collector owns the sampled socket table + rolling history.
@@ -313,7 +314,9 @@ func (c *Collector) ingestLocked(raws []RawConn, now time.Time) {
 					procCache[r.PID] = info
 				}
 			}
-			if procErr[r.PID] {
+			if procErr[r.PID] && r.ProcessName != "" {
+				item.ProcessName = r.ProcessName
+			} else if procErr[r.PID] {
 				unresolved++
 			} else {
 				item.ProcessName = info.Name

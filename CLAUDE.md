@@ -89,6 +89,20 @@ manual restart), and kernel-owned sockets (`time_wait` / `syn_recv`,
 which no process holds — even root sees pid 0) no longer count toward
 `partial`, which connection churn had been pinning permanently true.
 No wire or config-schema change.
+v0.3.2 closes the macOS ownership gap for short-lived pending connects
+(egress-blocked fleet: outbound connects churn through SYN_SENT and
+were gone or unattributed by sentinel poll time): the darwin sampler
+merges `netstat -anv -p tcp` into the lsof snapshot (`source:
+"lsof+netstat"`, informational wire-value change) and RawConn gains a
+sampler-provided ProcessName fallback used when the owning process
+exits before gopsutil enrichment. Linux needed no code change — procfs
+attributes all states including SYN_SENT (verified on arm64 GB10-class
+and x86_64 Ubuntu nodes, cross-user, with closed sockets retained in
+/network/flows). Also pins `toolchain go1.25.12` in go.mod for
+GO-2026-5856; the workflow `go-version: '1.25.11'` pins still want a
+matching bump by someone with workflow-scope credentials. The
+remaining sub-poll-interval capture gap is issue #27 (event-driven
+sources — EndpointSecurity / eBPF — deliberately deferred).
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading.

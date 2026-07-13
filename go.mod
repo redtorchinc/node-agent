@@ -1,12 +1,12 @@
 module github.com/redtorchinc/node-agent
 
-go 1.22
+go 1.25.0
 
 toolchain go1.25.12
 
 require (
 	github.com/shirou/gopsutil/v3 v3.24.5
-	golang.org/x/sys v0.20.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

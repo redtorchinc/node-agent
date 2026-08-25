@@ -166,3 +166,33 @@ OS; service-unit / container attribution is Linux-only. Full contract:
 | `RT_AGENT_VLLM` | `platforms.vllm.endpoint` |
 | `RT_AGENT_METRICS` | `metrics_enabled` (set to `1` or `true`) |
 | `RT_AGENT_CONFIG` | path to the config file itself |
+
+## `ray`
+
+```yaml
+ray:
+  enabled: auto            # auto (= detect) | true | false
+  dashboard_url: ""        # override for alive_nodes
+  probe_interval_s: 30
+```
+
+Surfaces `/health.ray` — this node's role in a Ray cluster (v0.3.3, issue
+#30), so the backend can group the members of an N-way tensor-parallel
+serving group instead of seeing the workers as idle nodes.
+
+- `enabled` — `auto` and `true` are the same thing: detection is the only
+  mode, since there is nothing to force on a node with no Ray. `false` skips
+  the probe, so the block is absent and `/capabilities.ray_supported` is
+  `false`.
+- `dashboard_url` — only needed when the dashboard genuinely lives
+  elsewhere. Empty derives `http://127.0.0.1:8265` on a head node (Ray binds
+  it to localhost by default, and the agent only queries the head's own) and
+  skips the fetch on a worker, which runs none. This affects `alive_nodes`
+  only; everything else comes from the raylet command line.
+- `probe_interval_s` — advisory, echoed on the wire as `probe_interval_s` so
+  the backend can judge staleness without hardcoding a threshold.
+
+Detection costs a process scan and a command-line parse. There is no
+`ray status` shell-out on the `/health` path.
+
+Wire contract: [api/ray.md](api/ray.md).

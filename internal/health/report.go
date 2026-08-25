@@ -28,6 +28,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/platforms"
 	pollama "github.com/redtorchinc/node-agent/internal/platforms/ollama"
 	"github.com/redtorchinc/node-agent/internal/platforms/vllm"
+	"github.com/redtorchinc/node-agent/internal/ray"
 	"github.com/redtorchinc/node-agent/internal/rdma"
 	"github.com/redtorchinc/node-agent/internal/safecast"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
@@ -51,9 +52,9 @@ type Report struct {
 	GPUs   []gpu.GPU `json:"gpus"`
 
 	// Disk and Network are v0.2.0 additions. Empty arrays when not measurable.
-	Disk    []disk.Info       `json:"disk"`
-	Network network.Info      `json:"network"`
-	TimeSync *timesync.Info   `json:"time_sync,omitempty"`
+	Disk     []disk.Info    `json:"disk"`
+	Network  network.Info   `json:"network"`
+	TimeSync *timesync.Info `json:"time_sync,omitempty"`
 
 	// Storage is v0.2.3: detected NAS / pooled storage (ZFS pools, NFS,
 	// CIFS, Ceph, GlusterFS, Lustre). Empty array when nothing matches.
@@ -86,6 +87,17 @@ type Report struct {
 	// RDMA is populated on Linux hosts with /sys/class/infiniband present.
 	// Omitted from /health entirely (nil) when no IB devices exist.
 	RDMA *rdma.Info `json:"rdma,omitempty"`
+
+	// Ray reports this node's membership in a Ray cluster (v0.3.3, issue
+	// #30). Omitted entirely (nil) when Ray isn't running — same contract
+	// as RDMA above, so presence means "this node is in a Ray cluster".
+	//
+	// ray.gcs_address is the grouping key: every member of a tensor-parallel
+	// serving group reports the same one, and the role: "head" member is the
+	// one holding the addressable inference endpoint. Without this the seven
+	// workers of an 8-way TP model look like idle nodes and get rendered
+	// offline.
+	Ray *ray.Info `json:"ray,omitempty"`
 
 	// Mode and Training are Phase B; populated only when training-mode is
 	// engaged. Always emitted: Mode defaults to "idle"/"inference".
@@ -145,21 +157,21 @@ type ModeReporter interface {
 // CPUInfo mirrors /health.cpu. v0.2.0 adds model/vendor/usage_pct/freq/temps
 // as additive fields; v0.1.x clients ignore them.
 type CPUInfo struct {
-	Model           string  `json:"model,omitempty"`
-	Vendor          string  `json:"vendor,omitempty"`
-	CoresPhysical   int     `json:"cores_physical"`
-	CoresLogical    int     `json:"cores_logical"`
-	FreqMHzCurrent  *int    `json:"freq_mhz_current,omitempty"`
-	FreqMHzMin      *int    `json:"freq_mhz_min,omitempty"`
-	FreqMHzMax      *int    `json:"freq_mhz_max,omitempty"`
-	UsagePct        *float64 `json:"usage_pct,omitempty"`
-	UsagePerCorePct []float64 `json:"usage_per_core_pct,omitempty"`
-	Load1m          float64 `json:"load_1m"`
-	Load5m          float64 `json:"load_5m"`
-	Load15m         float64 `json:"load_15m"`
+	Model           string       `json:"model,omitempty"`
+	Vendor          string       `json:"vendor,omitempty"`
+	CoresPhysical   int          `json:"cores_physical"`
+	CoresLogical    int          `json:"cores_logical"`
+	FreqMHzCurrent  *int         `json:"freq_mhz_current,omitempty"`
+	FreqMHzMin      *int         `json:"freq_mhz_min,omitempty"`
+	FreqMHzMax      *int         `json:"freq_mhz_max,omitempty"`
+	UsagePct        *float64     `json:"usage_pct,omitempty"`
+	UsagePerCorePct []float64    `json:"usage_per_core_pct,omitempty"`
+	Load1m          float64      `json:"load_1m"`
+	Load5m          float64      `json:"load_5m"`
+	Load15m         float64      `json:"load_15m"`
 	TempsC          []TempSensor `json:"temps_c,omitempty"`
-	Throttled       *bool   `json:"throttled,omitempty"`
-	ThrottleReasons []string `json:"throttle_reasons,omitempty"`
+	Throttled       *bool        `json:"throttled,omitempty"`
+	ThrottleReasons []string     `json:"throttle_reasons,omitempty"`
 }
 
 // TempSensor is one (sensor-name, value-in-celsius) reading. Sensor names
@@ -186,6 +198,7 @@ type Reporter struct {
 	Allocators *allocators.Store
 	Thermal    *thermal.Probe
 	TimeServer *timesync.ServerProbe
+	Ray        *ray.Detector
 
 	platforms []platforms.Platform // detectors in stable order
 	services  ServicesReporter
@@ -209,6 +222,11 @@ func NewReporter(cfg config.Config) (*Reporter, error) {
 	}
 	if cfg.TimeSync.Server != "" {
 		r.TimeServer = timesync.NewServerProbe(cfg.TimeSync.Server)
+	}
+	// Single source of truth for the on/off decision lives in config, so
+	// /capabilities.ray_supported and the probe can never disagree.
+	if cfg.RayEnabled() {
+		r.Ray = ray.New(rayCfg(cfg))
 	}
 	r.platforms = []platforms.Platform{
 		pollama.New(cfg.Platforms.Ollama),
@@ -258,6 +276,9 @@ func (r *Reporter) StartBackground(ctx context.Context) {
 	go r.keepWarmDatabases(ctx)
 	go r.keepWarmLegacyOllama(ctx)
 	go r.keepWarmPlatforms(ctx)
+	if r.Ray != nil {
+		go r.keepWarmRay(ctx)
+	}
 	if r.Thermal != nil {
 		r.Thermal.Start(ctx)
 	}
@@ -381,6 +402,10 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	rep.RDMA = rdma.Probe(ctx)
 	applyGPUDirectCapability(&rep)
 
+	if r.Ray != nil {
+		rep.Ray = r.Ray.Probe(ctx)
+	}
+
 	rep.Mode = deriveMode(rep, r.mode)
 	if r.mode != nil {
 		rep.Training = r.mode.Training()
@@ -500,6 +525,39 @@ func (r *Reporter) keepWarmPlatforms(ctx context.Context) {
 			}
 			cancel()
 		}
+	}
+	refresh()
+	t := time.NewTicker(keepWarmInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			refresh()
+		}
+	}
+}
+
+// rayCfg adapts the YAML config into the ray package's own Config, so that
+// package doesn't import internal/config (keeping it independently testable
+// the way internal/rdma is).
+func rayCfg(cfg config.Config) ray.Config {
+	return ray.Config{
+		Enabled:        cfg.Ray.Enabled,
+		DashboardURL:   cfg.Ray.DashboardURL,
+		ProbeIntervalS: cfg.Ray.ProbeIntervalS,
+	}
+}
+
+// keepWarmRay refreshes the Ray membership cache. Ray membership barely
+// moves, but the head's dashboard fetch for alive_nodes is the one network
+// call in that probe — the ticker absorbs it so /health doesn't.
+func (r *Reporter) keepWarmRay(ctx context.Context) {
+	refresh := func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		r.Ray.Refresh(wctx)
 	}
 	refresh()
 	t := time.NewTicker(keepWarmInterval)
@@ -705,8 +763,8 @@ func round2(f float64) float64 {
 // is wired (Phase B), its answer wins (it carries the explicit
 // "training_mode" state). Without one, the agent derives:
 //
-//	- "inference" if any platform reports a loaded model
-//	- "idle"      otherwise
+//   - "inference" if any platform reports a loaded model
+//   - "idle"      otherwise
 func deriveMode(rep Report, m ModeReporter) string {
 	if m != nil {
 		if v := m.Mode(); v != "" {

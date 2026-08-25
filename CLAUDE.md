@@ -140,9 +140,38 @@ load-bearing and now pinned from both sides** by tests in
 branch without adding it to the drop-in. Picking this up on a node
 requires re-running `sudo rt-node-agent install` (rewrites the drop-in),
 not just a binary swap.
+**v0.3.3** adds `/health.ray` (issue #30) — this node's Ray cluster role,
+so the backend can group an N-way tensor-parallel serving group. The
+motivating case: a model served across 8× GB10 behind a Ray head, where
+only the head has an OpenAI endpoint, so the seven workers looked like
+idle nodes with no inference platform and were rendered offline.
+**`ray.gcs_address` is the grouping key** — every member reports the same
+one and the `role: "head"` member holds the addressable endpoint. The
+block is omitted entirely when Ray isn't running (same contract as
+`rdma`), so presence means "in a cluster". Detection reads the raylet's
+own command line (`--gcs-address`, `--session-name`,
+`--static_resource_list`, socket paths for the session dir) — there is
+deliberately **no `ray status` shell-out**, which is a Python CLI costing
+seconds, and v0.2.8 already had to strip a 5s dead-weight out of darwin
+`/health`. Ray mixes `-` and `_` flag spellings across versions so both
+are accepted. `alive_nodes` is the one network call (Ray's dashboard,
+head-only, TTL-cached behind the keep-warm ticker) and is `int | null`
+with an **explicit null** when unknown — a missing key would read as `0`,
+and "empty cluster" is a very different claim from "dashboard
+unreachable". It is a convenience only: counting fleet rows that share a
+`gcs_address` is more reliable and doesn't depend on Ray's internal
+dashboard API, whose shape has moved across releases. **No new
+degraded_reasons value** — being a TP worker is topology, not health, and
+`TestRayDoesNotAddDegradedReason` pins that. New top-level `ray:` config
+key (surfaced by the migrator's missing-top-key detection) and capability
+flag `ray_supported`, which reports whether the *probe ran*: a missing
+block only means "not in a cluster" when that flag is true. Contract:
+docs/api/ray.md.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
-so v0.1.x configs keep loading.
+so v0.1.x configs keep loading. (`examples/config.yaml` used to claim it
+*was* removed; corrected in v0.3.3, and the example is now byte-identical
+to `config.DefaultYAML`.)
 [spec/SPEC.md](spec/SPEC.md) is the authoritative wire contract (any
 change there is a cross-repo break). [spec/V0_2_0_PLAN.md](spec/V0_2_0_PLAN.md)
 records the v0.2.0 design; [PLAN.md](PLAN.md) captures the original v0.1.0

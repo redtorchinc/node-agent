@@ -314,6 +314,54 @@ Feature detection: `/capabilities.network_flows_supported`. Config:
 `window_s`, `cmdline_max_bytes` (docs/config.md). Disabled ⇒ routes not
 registered (404, same as pre-v0.3.0 agents) and capability `false`.
 
+### `/health.ray` (v0.3.3 — Ray / tensor-parallel group membership)
+
+Additive optional block on `GET /health`. Reports this node's role in a Ray
+cluster so the backend can group the members of an N-way tensor-parallel
+serving group. Full wire contract, field table, and Ray-version parsing
+notes: [docs/api/ray.md](../docs/api/ray.md).
+
+Motivating case: a model served across 8× GB10 fronted by a Ray head. Only
+the head has an OpenAI-compatible endpoint, so the seven workers were
+indistinguishable from idle nodes with no inference platform and got
+rendered offline.
+
+```json
+"ray": {
+  "running": true,
+  "role": "worker",
+  "gcs_address": "192.168.50.96:6379",
+  "node_ip": "10.10.10.7",
+  "cluster_id": "session_2026-08-25_10-00-00_123456_789",
+  "alive_nodes": 8,
+  "resources": { "CPU": 20, "GPU": 1 }
+}
+```
+
+- **Omitted entirely when Ray isn't running** — same contract as `rdma`, so
+  presence means "this node is in a Ray cluster".
+- **`gcs_address` is the grouping key.** Every member reports the same one;
+  the `role: "head"` member holds the addressable endpoint. Group with
+  `GROUP BY ray.gcs_address`.
+- `cluster_id` is Ray's session name — cluster-wide, and it changes on
+  cluster restart, so it distinguishes incarnations.
+- `alive_nodes` is `int | null`, **explicit null when unknown** (a missing
+  key would read as `0`, and "empty cluster" ≠ "dashboard unreachable"). It
+  is a convenience only: counting fleet rows sharing a `gcs_address` is more
+  reliable than any single node's view, and does not depend on Ray's
+  internal dashboard API.
+- Detection is process + raylet command line, TTL-cached. No `ray status`
+  shell-out on the `/health` path.
+
+**No new `degraded_reasons` value.** Being a TP worker is a topology fact,
+not a health problem; the `degraded_reasons` vocabulary is unchanged by this
+addition and a test pins that.
+
+Feature detection: `/capabilities.ray_supported`. Config: `ray.enabled:
+auto|true|false` plus `dashboard_url`, `probe_interval_s` (docs/config.md).
+Disabled ⇒ probe doesn't run, block absent, capability `false` — so a
+missing block only means "not in a cluster" when the capability is `true`.
+
 ### `POST /actions/unload-model`
 
 Request (requires Bearer token):

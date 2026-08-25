@@ -55,22 +55,30 @@ func installSudoersDropIn() error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 	if _, err := tmp.WriteString(sudoersDropIn); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // already failing; the write error is the one worth returning
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if _, err := exec.LookPath("visudo"); err == nil {
+		// #nosec G204 -- fixed binary; tmpPath comes from os.CreateTemp, not
+		// from any external input. Install-time, root-only path.
 		cmd := exec.Command("visudo", "-cf", tmpPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("visudo check failed: %v: %s", err, out)
 		}
 	}
 	// Sudoers drop-ins must be 0440 and live in /etc/sudoers.d/.
+	// #nosec G301 -- /etc/sudoers.d must be 0755. sudo refuses to read an
+	// include directory with tighter perms, so 0750 would silently disable
+	// the drop-in.
 	if err := os.MkdirAll(filepath.Dir(sudoersDropInPath), 0o755); err != nil {
 		return err
 	}
+	// #nosec G306 -- 0440 is what sudo requires of a drop-in; it is already
+	// stricter than the 0600 gosec asks for in every respect that matters
+	// (read-only, no write bit at all).
 	if err := os.WriteFile(sudoersDropInPath, []byte(sudoersDropIn), 0o440); err != nil {
 		return err
 	}

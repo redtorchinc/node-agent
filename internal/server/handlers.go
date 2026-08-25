@@ -123,13 +123,13 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 	res, err := s.ollama.Unload(ctx, req.Model)
 	took := time.Since(start).Milliseconds()
 	if err != nil {
-		slog.Warn("unload failed", "model", req.Model, "err", err, "remote", r.RemoteAddr)
+		slog.Warn("unload failed", "model", logSafe(req.Model), "err", logSafe(err.Error()), "remote", r.RemoteAddr)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	slog.Info("unload ok",
-		"model", req.Model,
-		"unloaded", res.Unloaded,
+		"model", logSafe(req.Model),
+		"unloaded", logSafeSlice(res.Unloaded),
 		"took_ms", took,
 		"remote", r.RemoteAddr,
 	)

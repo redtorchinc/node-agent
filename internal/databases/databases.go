@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redtorchinc/node-agent/internal/safecast"
+
 	"github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -160,7 +162,7 @@ func Probe(ctx context.Context) []Database {
 		cmdline, _ := p.Cmdline()
 		rss := int64(0)
 		if mi, err := p.MemoryInfo(); err == nil && mi != nil {
-			rss = int64(mi.RSS / 1024 / 1024)
+			rss = safecast.BytesToMB(mi.RSS)
 		}
 		cpu, _ := p.CPUPercent()
 		candidates = append(candidates, Database{

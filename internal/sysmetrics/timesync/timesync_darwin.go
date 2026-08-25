@@ -26,6 +26,10 @@ func probeOSSync(ctx context.Context, server string) *Info {
 	}
 	cctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
+	// #nosec G204 -- fixed binary; `server` is the operator's configured
+	// timesync.server (or the time.apple.com default), passed as a discrete
+	// argv element with no shell involved. Operator config is already
+	// root-equivalent trust.
 	out, err := exec.CommandContext(cctx, "sntp", "-t", "1", server).Output()
 	if err != nil || len(out) == 0 {
 		return nil

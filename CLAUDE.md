@@ -232,8 +232,46 @@ internal/services/            # Allowlisted systemctl wrapper (Linux only)
 internal/mode/                # Training-mode state machine + state file
 internal/rdma/                # /sys/class/infiniband reader (Linux only)
 internal/sysmetrics/{disk,network,timesync}/  # Cross-platform helpers
+internal/safecast/            # Saturating uint64↔int64 casts (host metrics → wire)
 internal/{gpu,mem,ollama,allocators,service,buildinfo}/  # v0.1 modules
 ```
+
+Two small helpers exist to keep a whole class of finding from coming back —
+prefer them over hand-rolling at a new call site:
+
+- `internal/safecast` — host metrics arrive as `uint64`, the wire contract is
+  `int64`. `BytesToMB` / `I64` / `U64` saturate instead of wrapping, so an
+  out-of-range value can't reach `/health` as a negative and mislead the
+  ranker.
+- `internal/server/logsafe.go` — `logSafe` / `logSafeSlice` on any
+  request-derived string before it reaches `slog`.
+
+## Static analysis
+
+`gosec` and CodeQL both report into the Security tab; neither blocks CI
+(`gosec -no-fail`). The gosec job is **matrixed over GOOS**
+(linux/darwin/windows) — Go build tags mean a single-target scan is a
+single-platform scan, and this job was ubuntu-only until 2026-08, which
+hid every finding in `launchd.go`, `winsvc.go`, and the `*_darwin.go`
+files. Each target uploads under its own SARIF category; they would
+otherwise overwrite each other.
+
+Suppressions carry `#nosec <rule> -- <reason>`. **Treat a bare `#nosec`
+with no stated reason as untriaged**, not as reviewed. Two suppressions
+are load-bearing rather than cosmetic and should not be "cleaned up":
+
+- `internal/netown/netown.go` (G401/G505) — SHA-1 in `flowID` is a
+  content-addressed dedup key, not a security primitive, and
+  `docs/api/network-flows.md` specifies `flow_id` as a *stable SHA-1*
+  including the `sha1:` prefix in its sample. Changing the algorithm
+  breaks any backend joining on that value — a cross-repo contract
+  change. The prefix is what makes a future migration expressible.
+- the `0o644` / `0o640` / `0o755` write and mkdir modes (G301/G302/G306) —
+  each is the mode the consuming OS component *requires*. A systemd unit
+  must be world-readable or systemd won't load it; `/etc/sudoers.d` must
+  be `0755` or sudo ignores the drop-in; the token file is `0640
+  root:rt-agent` precisely so the non-root agent can read it, and `0600`
+  would lock it out.
 
 ## Build / run
 

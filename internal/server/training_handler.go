@@ -55,8 +55,12 @@ func (s *Server) handleTrainingMode(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "not in training_mode", http.StatusConflict)
 			return
 		}
+		// prev is a run_id an earlier caller supplied, round-tripped through
+		// training_mode.json. CodeQL does not flag this one — the taint
+		// crosses a file-persistence boundary — but the value is no less
+		// caller-controlled for having been on disk.
 		slog.Info("training-mode exit ok",
-			"previous_run_id", prev, "duration_s", dur, "remote", r.RemoteAddr)
+			"previous_run_id", logSafe(prev), "duration_s", dur, "remote", r.RemoteAddr)
 		writeJSON(w, http.StatusOK, trainingResp{
 			Status:        "ok",
 			Mode:          "idle",
@@ -81,7 +85,7 @@ func (s *Server) handleTrainingMode(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := s.ollama.Unload(ctx, m); err != nil {
 			slog.Warn("training-mode entry blocked by unload failure",
-				"model", m, "err", err, "remote", r.RemoteAddr)
+				"model", logSafe(m), "err", logSafe(err.Error()), "remote", r.RemoteAddr)
 			http.Error(w, "failed to unload "+m+": "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -103,8 +107,8 @@ func (s *Server) handleTrainingMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("training-mode entered",
-		"run_id", req.RunID,
-		"released", released,
+		"run_id", logSafe(req.RunID),
+		"released", logSafeSlice(released),
 		"expected_s", req.ExpectedDurationS,
 		"remote", r.RemoteAddr)
 	writeJSON(w, http.StatusOK, trainingResp{

@@ -73,6 +73,9 @@ func install() error {
 	}
 
 	unit := renderUnit(exe, netCaps)
+	// #nosec G306 -- 0644 is the required mode for a systemd unit file;
+	// systemd will not load one it cannot read, and `systemctl cat` is
+	// expected to work unprivileged. The unit contains no secret.
 	if err := os.WriteFile(systemdUnitPath, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("write unit: %w", err)
 	}
@@ -111,6 +114,9 @@ func ensureTokenLinux(path string) (string, error) {
 	if _, err := os.Stat(path); err == nil {
 		// Heal perms on an existing token file without rotating the secret.
 		_ = run("chown", "root:"+agentGroup, path)
+		// #nosec G302 -- 0640 root:rt-agent is the intended token mode, not a
+		// loose one: root writes it, the non-root agent must read it, and
+		// nobody else can. 0600 would lock the agent out of its own token.
 		_ = os.Chmod(path, 0o640)
 		return "", nil
 	}
@@ -118,6 +124,9 @@ func ensureTokenLinux(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// #nosec G306 -- see ensureTokenLinux above: 0640 root:rt-agent is
+	// deliberate so the non-root agent can read its own token. Group-only,
+	// never world-readable.
 	if err := os.WriteFile(path, []byte(tok+"\n"), 0o640); err != nil {
 		return "", err
 	}
@@ -165,6 +174,8 @@ func status() (State, error) {
 }
 
 func ensureUser(name string) error {
+	// #nosec G204 -- fixed binary, and `name` is the compile-time agent
+	// user constant. Install-time, root-only path.
 	if _, err := exec.Command("id", name).CombinedOutput(); err == nil {
 		return nil
 	}
@@ -189,6 +200,9 @@ func ensureDir(path string, mode os.FileMode, owner, group string) error {
 }
 
 func run(name string, args ...string) error {
+	// #nosec G204 -- install-time helper, root-only, never reached from an
+	// HTTP handler. Every call site passes literal binary names and
+	// literal or constant args; argv slice, so no shell.
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

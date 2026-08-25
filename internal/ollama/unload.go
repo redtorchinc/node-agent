@@ -35,6 +35,9 @@ func (c *Client) Unload(ctx context.Context, model string) (UnloadResult, error)
 
 	// Try CLI first.
 	if _, err := exec.LookPath("ollama"); err == nil {
+		// #nosec G204 -- `model` is caller-supplied but passed as a discrete
+		// argv element to a fixed binary; no shell is involved, so it cannot
+		// break out into another command. It is a value, not code.
 		cmd := exec.CommandContext(ctx, "ollama", "stop", model)
 		var out, errb bytes.Buffer
 		cmd.Stdout = &out

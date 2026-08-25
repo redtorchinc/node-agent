@@ -21,6 +21,10 @@ const (
 	ReasonVRAMOver90pct        = "vram_over_90pct"
 	ReasonLoadAvgOver2xCores   = "load_avg_over_2x_cores"
 	ReasonOllamaRunnerStuck    = "ollama_runner_stuck"
+	// #nosec G101 -- not a credential. gosec's G101 identifier pattern
+	// includes a bare `pw`, matched case-insensitively, and
+	// "Cree(pW)arn" satisfies it. Every constant in this block is a
+	// degraded_reasons wire string; see docs/degraded-reasons.md.
 	ReasonVRAMServiceCreepWarn = "vram_service_creep_warn"
 
 	// v0.2.0 hard reasons

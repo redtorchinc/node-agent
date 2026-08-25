@@ -212,6 +212,9 @@ func (m *Manager) writeStateLocked() {
 	if m.stateFile == "" || m.training == nil {
 		return
 	}
+	// #nosec G301 -- /var/lib/rt-node-agent is created by the root install
+	// path and must stay traversable by the non-root agent that owns the
+	// state file inside it.
 	if err := os.MkdirAll(filepath.Dir(m.stateFile), 0o755); err != nil {
 		slog.Warn("training-mode state dir mkdir failed", "path", m.stateFile, "err", err)
 	}
@@ -221,6 +224,9 @@ func (m *Manager) writeStateLocked() {
 		return
 	}
 	tmp := m.stateFile + ".tmp"
+	// #nosec G306 -- training_mode.json holds a run_id and timestamps, not
+	// a secret. 0640 keeps it off world-readable while letting the agent
+	// group read it for debugging.
 	if err := os.WriteFile(tmp, b, 0o640); err != nil {
 		slog.Warn("training-mode state write failed", "path", tmp, "err", err)
 		return

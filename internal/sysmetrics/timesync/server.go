@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redtorchinc/node-agent/internal/safecast"
 )
 
 // ServerProbeInterval is how often the background goroutine queries the
@@ -250,8 +252,8 @@ func queryNTP(ctx context.Context, host string) (*ntpResponse, error) {
 // toNTPTimestamp converts a Go time.Time to the 64-bit NTP timestamp
 // format (32 bits seconds since NTP epoch | 32 bits fractional seconds).
 func toNTPTimestamp(t time.Time) uint64 {
-	sec := uint64(t.Unix() + ntpEpochOffset)
-	frac := uint64(t.Nanosecond()) * (1 << 32) / 1_000_000_000
+	sec := safecast.U64(t.Unix() + ntpEpochOffset)
+	frac := safecast.U64(int64(t.Nanosecond())) * (1 << 32) / 1_000_000_000
 	return (sec << 32) | (frac & 0xFFFFFFFF)
 }
 

@@ -147,6 +147,8 @@ the agent has no public Go API.
 | [internal/service/service.go](internal/service/service.go) | OS service-manager interface. Implementations: `systemd.go` (Linux), `launchd.go` (macOS), `winsvc.go` (Windows). |
 | [internal/service/bootstrap.go](internal/service/bootstrap.go) | `writeConfigExample` + `runConfigMigrate` invoked by every per-OS `install()`. |
 | [internal/buildinfo/buildinfo.go](internal/buildinfo/buildinfo.go) | Three `var`s set at link time via `-ldflags`. Defaults `dev`/`unknown` for local builds. |
+| [internal/safecast/safecast.go](internal/safecast/safecast.go) | Saturating integer conversions. Host metrics arrive as `uint64`; the wire contract is `int64`. Use `BytesToMB` / `I64` / `U64` instead of a bare cast so an out-of-range value clamps instead of arriving on `/health` as a negative. |
+| [internal/server/logsafe.go](internal/server/logsafe.go) | `logSafe` / `logSafeSlice` — strip control characters and cap length on caller-supplied strings before they reach `slog`. Apply to any request-derived value being logged. |
 
 ---
 

@@ -150,6 +150,10 @@ func (n *NvidiaSMI) run(ctx context.Context, name string, args ...string) ([]byt
 	if n.Exec != nil {
 		return n.Exec(ctx, name, args...)
 	}
+	// #nosec G204 -- `name` is a compile-time constant path to nvidia-smi
+	// and args are built here, not from request input. exec.CommandContext
+	// takes an argv slice and never invokes a shell, so there is no
+	// metacharacter surface even if a value were attacker-influenced.
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

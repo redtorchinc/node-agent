@@ -22,6 +22,9 @@ import (
 // in-memory defaults all agree.
 func writeConfigExample(dir string) error {
 	p := filepath.Join(dir, "config.yaml.example")
+	// #nosec G306 -- config.yaml.example is documentation, not a secret, and
+	// operators need to read it as a non-root user to copy it into place.
+	// Secrets live in the separate token file (0640 root:rt-agent).
 	return os.WriteFile(p, []byte(config.DefaultYAML), 0o644)
 }
 

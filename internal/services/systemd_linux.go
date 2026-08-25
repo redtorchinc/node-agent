@@ -244,6 +244,12 @@ func isRoot() bool {
 func runWithTimeout(ctx context.Context, d time.Duration, name string, args ...string) ([]byte, error) {
 	cctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
+	// #nosec G204 -- `name` is one of the closed systemctlPaths entries or
+	// /usr/bin/sudo, and the unit name has already passed the config
+	// allowlist in validate(). Passed as a discrete argv element to
+	// exec.CommandContext, which never invokes a shell: a unit named
+	// `rt-vllm-x.service; rm -rf /` fails the allowlist first and would be
+	// an inert single argument even if it did not.
 	cmd := exec.CommandContext(cctx, name, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

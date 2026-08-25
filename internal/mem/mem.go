@@ -6,6 +6,8 @@ package mem
 import (
 	"context"
 
+	"github.com/redtorchinc/node-agent/internal/safecast"
+
 	gmem "github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -65,14 +67,14 @@ func Probe(_ context.Context) (Info, error) {
 		return Info{}, err
 	}
 	i := Info{
-		TotalMB:     int64(v.Total / 1024 / 1024),
-		UsedMB:      int64(v.Used / 1024 / 1024),
+		TotalMB:     safecast.BytesToMB(v.Total),
+		UsedMB:      safecast.BytesToMB(v.Used),
 		UsedPct:     round2(v.UsedPercent),
-		AvailableMB: int64(v.Available / 1024 / 1024),
-		BuffersMB:   int64(v.Buffers / 1024 / 1024),
-		CachedMB:    int64(v.Cached / 1024 / 1024),
-		SwapTotalMB: int64(s.Total / 1024 / 1024),
-		SwapUsedMB:  int64(s.Used / 1024 / 1024),
+		AvailableMB: safecast.BytesToMB(v.Available),
+		BuffersMB:   safecast.BytesToMB(v.Buffers),
+		CachedMB:    safecast.BytesToMB(v.Cached),
+		SwapTotalMB: safecast.BytesToMB(s.Total),
+		SwapUsedMB:  safecast.BytesToMB(s.Used),
 		SwapUsedPct: round2(s.UsedPercent),
 		Unified:     unified(),
 	}

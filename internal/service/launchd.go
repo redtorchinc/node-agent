@@ -51,6 +51,9 @@ func install() error {
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
+	// #nosec G301 -- /etc/rt-node-agent must stay traversable so the agent
+	// and operators can read config.yaml. The token file inside it carries
+	// its own 0600 (see ensureTokenDarwin).
 	if err := os.MkdirAll(configDirMac, 0o755); err != nil {
 		return err
 	}
@@ -159,10 +162,14 @@ func allowFirewall(exe string) {
 	if _, err := os.Stat(fw); err != nil {
 		return
 	}
+	// #nosec G204 -- `fw` is the compile-time socketfilterfw path and `exe`
+	// is our own os.Executable() run through EvalSymlinks. Install-time,
+	// root-only; argv slice, so no shell.
 	cmd := exec.Command(fw, "--add", exe)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
+	// #nosec G204 -- see above: constant binary, own executable path.
 	cmd = exec.Command(fw, "--unblockapp", exe)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -183,6 +190,7 @@ func uninstall() error {
 	if _, err := os.Stat(fw); err == nil {
 		if exe, err := os.Executable(); err == nil {
 			exe, _ = filepath.EvalSymlinks(exe)
+			// #nosec G204 -- see installFirewall: constant binary, own path.
 			_ = exec.Command(fw, "--remove", exe).Run()
 		}
 	}
@@ -208,6 +216,9 @@ func status() (State, error) {
 }
 
 func runLaunchctl(args ...string) error {
+	// #nosec G204 -- fixed binary; every call site passes literal
+	// subcommands and the compile-time service label. Root-only install
+	// path, never reached from an HTTP handler.
 	cmd := exec.Command("launchctl", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -219,6 +230,7 @@ func runLaunchctl(args ...string) error {
 // not found" failure is expected on a fresh install and would otherwise
 // clutter the install output.
 func runLaunchctlQuiet(args ...string) error {
+	// #nosec G204 -- see runLaunchctl.
 	return exec.Command("launchctl", args...).Run()
 }
 
@@ -242,6 +254,9 @@ func runLaunchctlQuiet(args ...string) error {
 // fresh boxes where the plist file doesn't exist yet, and the
 // label-form covers the modern case.
 func bootoutExisting(label, plistPath string) {
+	// #nosec G204 -- `label` is the compile-time launchd label constant,
+	// not external input. gosec flags it HIGH only because of the string
+	// concat. Fixed binary, argv slice, no shell.
 	cmd := exec.Command("launchctl", "bootout", "system/"+label)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -275,6 +290,7 @@ func bootoutExisting(label, plistPath string) {
 // (meaning the kernel still has the service bootstrapped). Used to wait
 // out the teardown between bootout and bootstrap.
 func labelLoaded(label string) bool {
+	// #nosec G204 -- see bootoutExisting: compile-time label constant.
 	return exec.Command("launchctl", "print", "system/"+label).Run() == nil
 }
 
@@ -291,7 +307,7 @@ func writeRootWheelFile(dst, tmpl string, args ...interface{}) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // already failing; the write error is the one to return
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -299,6 +315,8 @@ func writeRootWheelFile(dst, tmpl string, args ...interface{}) error {
 	}
 	// /usr/bin/install -o root -g wheel -m 644 src dst — atomic rename
 	// into place with the exact ownership launchctl requires.
+	// #nosec G204 -- absolute constant binary; tmpName is from
+	// os.CreateTemp and dst is a compile-time plist path. Root-only.
 	cmd := exec.Command("/usr/bin/install", "-o", "root", "-g", "wheel", "-m", "644", tmpName, dst)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

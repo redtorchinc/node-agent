@@ -26,6 +26,10 @@ func install() error {
 	// Config dir under %ProgramData% — default ACL there lets the service
 	// (running as LocalSystem) read files that Administrators created.
 	cfgDir := winConfigDir()
+	// #nosec G301 -- the unix mode is largely advisory on Windows; access is
+	// governed by the inherited %ProgramData% ACL, which is what lets the
+	// LocalSystem service read files Administrators created (see comment
+	// above). Tightening the mode bits would not change the ACL.
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
@@ -48,7 +52,8 @@ func install() error {
 
 	// Fail clean if already installed.
 	if s, err := m.OpenService(svcName); err == nil {
-		s.Close()
+		_ = s.Close() // probe only; we return an error either way
+
 		return fmt.Errorf("service %q already installed; run uninstall first", svcName)
 	}
 

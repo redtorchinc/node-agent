@@ -49,27 +49,50 @@ jobs:
         run: govulncheck ./...
 
   gosec:
-    name: gosec
+    # Matrixed over GOOS because Go build tags mean a single-target scan is a
+    # single-platform scan. This job ran ubuntu-only until 2026-08, so every
+    # finding in launchd.go, winsvc.go and the *_darwin.go files was
+    # invisible to the Security tab — 11 real gosec findings on darwin and 2
+    # on windows, none of which had ever been triaged. The platform matrix in
+    # CLAUDE.md is the whole point of this repo; the scanner has to see it.
+    name: gosec (${{ matrix.goos }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25.14'
           cache: true
+
+      # Invoked directly rather than via securego/gosec, which is a Docker
+      # action pinned to @master — an unpinnable moving ref in a public repo,
+      # and no way to set GOOS for the analysis. `go install` mirrors how the
+      # govulncheck job above gets its tool.
+      - name: install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
       - name: run gosec
-        # Pinned by version tag; the action's image carries gosec itself.
-        # SARIF output integrates with the Security tab.
-        uses: securego/gosec@master
-        with:
-          args: '-no-fail -fmt sarif -out gosec.sarif ./...'
+        # -no-fail: findings land in the Security tab for triage rather than
+        # blocking the build. Suppressions carry a `#nosec <rule> -- reason`
+        # comment; anything without a stated reason should be treated as
+        # untriaged.
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+
       - name: upload SARIF
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: gosec.sarif
-          category: gosec
+          # Distinct category per target, or each upload would overwrite the
+          # previous one and only the last GOOS would survive in the tab.
+          category: gosec-${{ matrix.goos }}
 
   gitleaks:
     name: gitleaks

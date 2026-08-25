@@ -81,6 +81,8 @@ func probeKernelModules() map[string]bool {
 }
 
 func readSysfs(path string) string {
+	// #nosec G304 -- paths are composed here from /sys/class/infiniband plus
+	// entries read back from that directory. No external input reaches this.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -146,6 +148,7 @@ func readCounters(dir string) Counters {
 }
 
 func readUint(path string) uint64 {
+	// #nosec G304 -- see readSysfs: /sys/class/infiniband subtree only.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return 0

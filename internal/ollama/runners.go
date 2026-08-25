@@ -3,6 +3,8 @@ package ollama
 import (
 	"strings"
 
+	"github.com/redtorchinc/node-agent/internal/safecast"
+
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -27,7 +29,7 @@ func probeRunners() []Runner {
 		cpu, _ := p.CPUPercent()
 		rss := int64(0)
 		if mi, err := p.MemoryInfo(); err == nil && mi != nil {
-			rss = int64(mi.RSS / 1024 / 1024)
+			rss = safecast.BytesToMB(mi.RSS)
 		}
 		out = append(out, Runner{
 			PID:    int(p.Pid),

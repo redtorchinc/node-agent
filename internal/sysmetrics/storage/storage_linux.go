@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/redtorchinc/node-agent/internal/safecast"
 )
 
 // probe enumerates network/pooled storage by combining three sources:
@@ -141,8 +143,8 @@ func fillCapacity(info *Info, mountpoint string) {
 	if err := syscall.Statfs(mountpoint, &st); err != nil {
 		return
 	}
-	total := uint64(st.Bsize) * st.Blocks
-	free := uint64(st.Bsize) * st.Bfree
+	total := safecast.U64(int64(st.Bsize)) * st.Blocks
+	free := safecast.U64(int64(st.Bsize)) * st.Bfree
 	used := total - free
 	if total == 0 {
 		return

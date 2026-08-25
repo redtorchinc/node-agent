@@ -27,6 +27,9 @@
 package netown
 
 import (
+	// #nosec G505 -- SHA-1 here is a content-addressed identifier, not a
+	// security primitive. See flowID at the bottom of this file for why it
+	// cannot be swapped without a cross-repo break.
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -546,6 +549,23 @@ func isWildcard(a string) bool {
 	return a == "" || a == "0.0.0.0" || a == "::"
 }
 
+// flowID derives the wire-visible `flow_id` for a socket entry.
+//
+// SHA-1 is deliberate and is NOT used as a security primitive: this is a
+// dedup key over a tuple the backend already has, letting it recognise the
+// same flow across polls. Nothing authenticates or authorises on it, and an
+// adversary who could forge a collision would gain only the ability to make
+// two of their own sockets look like one.
+//
+// It also cannot be changed unilaterally. docs/api/network-flows.md
+// specifies `flow_id` as a "stable SHA-1" and shows the `sha1:` prefix in
+// the response sample, so any backend deduping or joining on this value
+// breaks if the algorithm moves. That is a cross-repo contract change, not
+// a local cleanup — see CLAUDE.md. The prefix exists precisely so such a
+// migration is expressible later: emit `sha256:` alongside, let the backend
+// accept both, then drop `sha1:`.
+//
+// #nosec G401 -- non-cryptographic use, wire-contract bound; see above.
 func flowID(k key, firstSeenNS int64) string {
 	h := sha1.Sum([]byte(fmt.Sprintf("%s|%s|%d|%s|%d|%d|%d",
 		k.proto, k.laddr, k.lport, k.raddr, k.rport, k.pid, firstSeenNS)))

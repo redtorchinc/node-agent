@@ -109,6 +109,10 @@ var ErrBrokenYAML = errors.New("existing config.yaml is not valid YAML")
 // elsewhere in the default — explaining the keys, sectioning the file
 // — are preserved.
 func Migrate(existingPath, defaultYAML string) (Result, error) {
+	// #nosec G304 -- reading the operator's config from an operator-supplied
+	// path is this function's entire purpose. The path comes from the CLI
+	// flag or the built-in default, never from a request; the agent exposes
+	// no endpoint that reads or writes an arbitrary file.
 	existingBytes, err := os.ReadFile(existingPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -160,6 +164,10 @@ func Migrate(existingPath, defaultYAML string) (Result, error) {
 	if err := os.Rename(existingPath, backupPath); err != nil {
 		return Result{}, fmt.Errorf("backup %s → %s: %w", existingPath, backupPath, err)
 	}
+	// #nosec G306 -- config.yaml is deliberately world-readable: operators
+	// inspect it as a normal user, and it holds no secret (the token lives
+	// in a separate 0640 file). Migration preserves the file's role, and
+	// tightening here would break existing installs on upgrade.
 	if err := os.WriteFile(existingPath, merged.Bytes(), 0o644); err != nil {
 		// Try to restore the original on write failure so the operator
 		// isn't left with no live config.
@@ -194,6 +202,8 @@ func ForceReset(path, defaultYAML string) (backupPath string, err error) {
 	} else if statErr != nil && !os.IsNotExist(statErr) {
 		return "", fmt.Errorf("stat %s: %w", path, statErr)
 	}
+	// #nosec G306 -- same as the merge path above: config.yaml is
+	// non-secret and world-readable by design.
 	if err := os.WriteFile(path, []byte(defaultYAML), 0o644); err != nil {
 		return backupPath, fmt.Errorf("write defaults to %s: %w", path, err)
 	}

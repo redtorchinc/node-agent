@@ -29,6 +29,7 @@ import (
 	pollama "github.com/redtorchinc/node-agent/internal/platforms/ollama"
 	"github.com/redtorchinc/node-agent/internal/platforms/vllm"
 	"github.com/redtorchinc/node-agent/internal/rdma"
+	"github.com/redtorchinc/node-agent/internal/safecast"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/network"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/storage"
@@ -298,7 +299,7 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 		rep.Hostname = h
 	}
 	if up, err := host.Uptime(); err == nil {
-		rep.UptimeS = int64(up)
+		rep.UptimeS = safecast.I64(up)
 	} else {
 		rep.UptimeS = int64(r.now().Sub(r.start).Seconds())
 	}

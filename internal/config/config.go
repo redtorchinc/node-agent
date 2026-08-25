@@ -257,6 +257,10 @@ func Load() (Config, error) {
 		if tp == "" {
 			tp = DefaultTokenPath()
 		}
+		// #nosec G304 -- reading the bearer token from an operator-configured
+		// path is the documented auth model (token_file, or the platform
+		// default). The path comes from config or the built-in default, never
+		// from a request: the agent exposes no endpoint that reads a file.
 		if b, err := os.ReadFile(tp); err == nil {
 			c.Token = strings.TrimSpace(string(b))
 		}
@@ -266,6 +270,11 @@ func Load() (Config, error) {
 }
 
 func loadFile(path string, c *Config) error {
+	// #nosec G304 G703 -- loading the config from an operator-supplied path
+	// is the point of this function; `path` is the --config flag or the
+	// compiled-in default. The taint G703 traces is a CLI argument, which
+	// is already root-equivalent trust: an operator who can set it can also
+	// just read the file. No request-derived value ever reaches here.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err

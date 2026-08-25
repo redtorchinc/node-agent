@@ -61,12 +61,13 @@ func (s *Server) handleServiceAction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, msg := mapServiceErr(err)
 		slog.Warn("service action denied or failed",
-			"unit", req.Unit, "action", req.Action, "code", code, "err", err, "remote", r.RemoteAddr)
+			"unit", logSafe(req.Unit), "action", logSafe(req.Action),
+			"code", code, "err", logSafe(err.Error()), "remote", r.RemoteAddr)
 		http.Error(w, msg, code)
 		return
 	}
 	slog.Info("service action ok",
-		"unit", req.Unit, "action", req.Action,
+		"unit", logSafe(req.Unit), "action", logSafe(req.Action),
 		"active", res.ActiveState, "sub", res.SubState,
 		"took_ms", res.TookMS, "remote", r.RemoteAddr)
 	writeJSON(w, http.StatusOK, serviceResp{Status: "ok", Result: res})

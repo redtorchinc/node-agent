@@ -148,4 +148,15 @@ network:
   poll_interval_s: 10      # background socket-table sample cadence
   window_s: 300            # retention for closed sockets (late NetFlow joins)
   cmdline_max_bytes: 240   # cmdline_head cap, applied after redaction
+
+# Ray / tensor-parallel group membership, surfaced as /health.ray.
+# Lets the backend group an N-way TP serving group (e.g. one model across
+# 8x GB10) by ray.gcs_address instead of seeing the workers as idle nodes.
+# Detection is process + raylet command line only -- no "ray status"
+# shell-out, which is a Python CLI costing seconds.
+# See docs/api/ray.md for the wire contract.
+ray:
+  enabled: auto            # auto (= detect) | true | false
+  dashboard_url: ""        # override for alive_nodes; default http://<node_ip>:8265 on the head
+  probe_interval_s: 30     # advisory, echoed on the wire for staleness checks
 `

@@ -50,6 +50,33 @@ type Config struct {
 	RDMA         RDMAConfig         `yaml:"rdma"`
 	TimeSync     TimeSyncConfig     `yaml:"timesync"`
 	Network      NetworkConfig      `yaml:"network"`
+	Ray          RayConfig          `yaml:"ray"`
+}
+
+// RayConfig configures the /health.ray block (v0.3.3, issue #30) — this
+// node's membership in a Ray cluster, so the backend can group the members
+// of an N-way tensor-parallel serving group instead of seeing the workers
+// as idle machines with no inference platform.
+//
+// Detection is process + command-line only, so there is no cost worth
+// gating beyond the off switch. Notably absent: any `ray status` shell-out,
+// which is a Python CLI costing seconds.
+type RayConfig struct {
+	// Enabled: "auto" (default) | "true" | "false". auto and true are the
+	// same thing — detection is the only mode, since there is nothing to
+	// force on a node with no Ray. "false" skips the probe entirely: no ray
+	// block on /health, and capabilities reports ray_supported: false.
+	Enabled string `yaml:"enabled"`
+
+	// DashboardURL overrides where alive_nodes is read from. Empty derives
+	// http://<node_ip>:8265 on a head and skips the fetch on a worker
+	// (workers run no dashboard). Only needed for unusual topologies.
+	DashboardURL string `yaml:"dashboard_url"`
+
+	// ProbeIntervalS is surfaced on the wire as probe_interval_s so the
+	// backend can judge staleness without hardcoding a threshold — the
+	// lesson from issue #8. Default 30.
+	ProbeIntervalS int `yaml:"probe_interval_s"`
 }
 
 // NetworkConfig configures the /network/* flow-ownership surface
@@ -141,11 +168,11 @@ type TrainingModeConfig struct {
 
 // RDMAConfig configures RDMA collection (Phase B, Linux only).
 type RDMAConfig struct {
-	Enabled                  string `yaml:"enabled"` // auto | true | false
-	CollectIntervalS         int    `yaml:"collect_interval_s"`
-	PFCStormThresholdRxRate  int    `yaml:"pfc_storm_threshold_rx_rate"`
-	PFCStormWindowS          int    `yaml:"pfc_storm_window_s"`
-	ErrorsGrowingWindowS     int    `yaml:"errors_growing_window_s"`
+	Enabled                 string `yaml:"enabled"` // auto | true | false
+	CollectIntervalS        int    `yaml:"collect_interval_s"`
+	PFCStormThresholdRxRate int    `yaml:"pfc_storm_threshold_rx_rate"`
+	PFCStormWindowS         int    `yaml:"pfc_storm_window_s"`
+	ErrorsGrowingWindowS    int    `yaml:"errors_growing_window_s"`
 }
 
 // Defaults returns the baseline config used when no file and no env vars
@@ -181,6 +208,10 @@ func Defaults() Config {
 			PollIntervalS:   10,
 			WindowS:         300,
 			CmdlineMaxBytes: 240,
+		},
+		Ray: RayConfig{
+			Enabled:        "auto",
+			ProbeIntervalS: 30,
 		},
 	}
 }
@@ -405,4 +436,11 @@ func normalize(c *Config) {
 // matrix, so auto has nothing to probe.
 func (c Config) NetworkFlowsEnabled() bool {
 	return c.Network.FlowsEnabled != "false"
+}
+
+// RayEnabled reports whether the /health.ray probe runs. "auto" and "true"
+// both enable: detection is process-based and works on every OS in the
+// build matrix, so there is nothing for auto to gate on.
+func (c Config) RayEnabled() bool {
+	return !strings.EqualFold(c.Ray.Enabled, "false")
 }

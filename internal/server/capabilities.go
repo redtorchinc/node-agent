@@ -33,7 +33,14 @@ type Capabilities struct {
 	// ownership surface (v0.3.0): /network/sockets, /network/flows,
 	// /network/resolve. False when network.flows_enabled: false — the
 	// routes aren't registered at all in that case.
-	NetworkFlowsSupported        bool     `json:"network_flows_supported"`
+	NetworkFlowsSupported bool `json:"network_flows_supported"`
+	// RaySupported advertises the /health.ray block (v0.3.3, issue #30):
+	// this node's Ray cluster role, gcs_address, and TP group membership.
+	// False when ray.enabled: false — the probe doesn't run, so the block is
+	// absent and its absence would otherwise be indistinguishable from "Ray
+	// isn't installed here". Backends must not read a missing ray block as
+	// "not in a cluster" unless this is true.
+	RaySupported                 bool     `json:"ray_supported"`
 	SystemMetricsFieldsSupported []string `json:"system_metrics_fields_supported"`
 }
 
@@ -53,6 +60,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		TrainingModeSupported:  true,
 		TimeHandshakeSupported: true,
 		NetworkFlowsSupported:  s.netown != nil,
+		RaySupported:           s.cfg.RayEnabled(),
 	}
 	// RDMA presence is detected at probe time; the agent advertises support
 	// when the package's runtime check passes. On non-Linux we always

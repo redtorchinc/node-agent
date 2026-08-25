@@ -4,8 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -170,20 +169,32 @@ func TestRoleFor(t *testing.T) {
 	}
 }
 
-func TestSessionFromDiskReadsSymlink(t *testing.T) {
-	// Covers the knownDir path; the /tmp/ray fallback is not exercised
-	// because it would depend on the host's real Ray state.
-	dir := t.TempDir()
-	session := filepath.Join(dir, "session_2026-08-25_11-00-00_1_2")
-	if err := os.MkdirAll(session, 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestSessionFromDiskUsesKnownDir(t *testing.T) {
+	// A Ray-emitted POSIX path, deliberately not t.TempDir(): this parser
+	// must behave identically on every OS in the build matrix, and an
+	// OS-native temp path would hide a windows separator bug.
+	const session = "/tmp/ray/session_2026-08-25_11-00-00_1_2"
+
 	name, got := sessionFromDisk(session)
 	if name != "session_2026-08-25_11-00-00_1_2" {
 		t.Errorf("name = %q", name)
 	}
 	if got != session {
 		t.Errorf("dir = %q, want %q", got, session)
+	}
+}
+
+// Regression (windows CI): paths from the raylet are POSIX and land verbatim
+// on the wire as session_dir. filepath.Dir on a windows build rewrote
+// "/tmp/ray/session_x" to "\\tmp\\ray\\session_x"; this package uses
+// `path` so the result is slash-form on every OS.
+func TestSessionPathsStaySlashFormOnEveryOS(t *testing.T) {
+	got := sessionDirFromFlags(parseFlags(raylet2x))
+	if strings.ContainsRune(got, '\\') {
+		t.Errorf("session dir %q contains a backslash; must stay POSIX on all platforms", got)
+	}
+	if !strings.HasPrefix(got, "/") {
+		t.Errorf("session dir %q should start with /", got)
 	}
 }
 

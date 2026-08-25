@@ -52,7 +52,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,9 +92,10 @@ type Config struct {
 	// /health has no ray block and capabilities reports ray_supported).
 	Enabled string
 
-	// DashboardURL overrides where alive_nodes/resources are read from.
-	// Empty means derive it: http://<node_ip>:8265 on a head node, and no
-	// fetch at all on a worker (workers don't run a dashboard).
+	// DashboardURL overrides where alive_nodes is read from. Empty means
+	// derive http://127.0.0.1:8265 on a head node (Ray binds the dashboard to
+	// localhost by default, and we only ever query the head's own), and skip
+	// the fetch entirely on a worker — workers run no dashboard.
 	DashboardURL string
 
 	// ProbeIntervalS is advisory, surfaced on the wire as probe_interval_s
@@ -470,18 +471,24 @@ func parseStaticResourceList(s string) map[string]float64 {
 //
 // Reading it from the socket path rather than assuming /tmp/ray means a
 // non-default --temp-dir is handled for free.
+//
+// Uses `path`, not `path/filepath`, throughout this package: these are
+// Ray-emitted POSIX paths that we are only ever *parsing*, and they end up
+// verbatim on the wire as session_dir. filepath.Dir on a windows build
+// rewrites "/tmp/ray/session_x" to "\tmp\ray\session_x", which would put
+// a mangled path in the JSON. Caught by the windows CI job.
 func sessionDirFromFlags(flags map[string]string) string {
 	for _, k := range []string{"raylet_socket_name", "store_socket_name", "raylet-socket-name", "store-socket-name"} {
-		p := flags[k]
-		if p == "" {
+		sock := flags[k]
+		if sock == "" {
 			continue
 		}
 		// .../<session>/sockets/<name> -> .../<session>
-		dir := filepath.Dir(filepath.Dir(p))
-		if filepath.Base(dir) == "sockets" {
-			dir = filepath.Dir(dir)
+		dir := path.Dir(path.Dir(sock))
+		if path.Base(dir) == "sockets" {
+			dir = path.Dir(dir)
 		}
-		if strings.HasPrefix(filepath.Base(dir), "session") {
+		if strings.HasPrefix(path.Base(dir), "session") {
 			return dir
 		}
 	}
@@ -494,7 +501,7 @@ func sessionDirFromFlags(flags map[string]string) string {
 // Returns (sessionName, sessionDir).
 func sessionFromDisk(knownDir string) (string, string) {
 	if knownDir != "" {
-		if base := filepath.Base(knownDir); strings.HasPrefix(base, "session") && base != "session_latest" {
+		if base := path.Base(knownDir); strings.HasPrefix(base, "session") && base != "session_latest" {
 			return base, knownDir
 		}
 	}
@@ -503,10 +510,10 @@ func sessionFromDisk(knownDir string) (string, string) {
 	if err != nil {
 		return "", ""
 	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(latest), target)
+	if !path.IsAbs(target) {
+		target = path.Join(path.Dir(latest), target)
 	}
-	base := filepath.Base(target)
+	base := path.Base(target)
 	if !strings.HasPrefix(base, "session") {
 		return "", ""
 	}

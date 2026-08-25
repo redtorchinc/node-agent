@@ -69,8 +69,9 @@ type RayConfig struct {
 	Enabled string `yaml:"enabled"`
 
 	// DashboardURL overrides where alive_nodes is read from. Empty derives
-	// http://<node_ip>:8265 on a head and skips the fetch on a worker
-	// (workers run no dashboard). Only needed for unusual topologies.
+	// http://127.0.0.1:8265 on a head (Ray binds the dashboard to localhost
+	// by default) and skips the fetch on a worker, which runs none. Only
+	// needed when the dashboard genuinely lives elsewhere.
 	DashboardURL string `yaml:"dashboard_url"`
 
 	// ProbeIntervalS is surfaced on the wire as probe_interval_s so the

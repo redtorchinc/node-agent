@@ -85,6 +85,11 @@ that has changed shape across Ray releases. It is:
 
 - read only on the **head** (workers run no dashboard), unless
   `ray.dashboard_url` is set explicitly;
+- fetched from `http://127.0.0.1:8265`, never from `node_ip` — Ray binds the
+  dashboard to localhost by default and the agent only ever queries the
+  head's *own*, so localhost is never worse. Deriving from `node_ip` meant a
+  node whose registered Ray IP wasn't locally routable burned the full
+  timeout on every refresh;
 - `null` whenever the dashboard is unreachable or returns a shape the agent
   doesn't recognise, with `error` saying which;
 - a count of nodes reported **ALIVE**, not a summary total — a total that

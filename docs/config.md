@@ -184,10 +184,11 @@ serving group instead of seeing the workers as idle nodes.
   mode, since there is nothing to force on a node with no Ray. `false` skips
   the probe, so the block is absent and `/capabilities.ray_supported` is
   `false`.
-- `dashboard_url` — only needed for unusual topologies. Empty derives
-  `http://<node_ip>:8265` on a head node and skips the fetch on a worker
-  (workers run no dashboard). This affects `alive_nodes` only; everything
-  else comes from the raylet command line.
+- `dashboard_url` — only needed when the dashboard genuinely lives
+  elsewhere. Empty derives `http://127.0.0.1:8265` on a head node (Ray binds
+  it to localhost by default, and the agent only queries the head's own) and
+  skips the fetch on a worker, which runs none. This affects `alive_nodes`
+  only; everything else comes from the raylet command line.
 - `probe_interval_s` — advisory, echoed on the wire as `probe_interval_s` so
   the backend can judge staleness without hardcoding a threshold.
 

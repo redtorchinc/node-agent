@@ -17,10 +17,10 @@ const (
 	ReasonAgentStale               = "agent_stale"
 	ReasonVRAMServiceCreepCritical = "vram_service_creep_critical"
 	// v0.1.x soft reasons
-	ReasonSwapOver50pct        = "swap_over_50pct"
-	ReasonVRAMOver90pct        = "vram_over_90pct"
-	ReasonLoadAvgOver2xCores   = "load_avg_over_2x_cores"
-	ReasonOllamaRunnerStuck    = "ollama_runner_stuck"
+	ReasonSwapOver50pct      = "swap_over_50pct"
+	ReasonVRAMOver90pct      = "vram_over_90pct"
+	ReasonLoadAvgOver2xCores = "load_avg_over_2x_cores"
+	ReasonOllamaRunnerStuck  = "ollama_runner_stuck"
 	// #nosec G101 -- not a credential. gosec's G101 identifier pattern
 	// includes a bare `pw`, matched case-insensitively, and
 	// "Cree(pW)arn" satisfies it. Every constant in this block is a
@@ -28,13 +28,13 @@ const (
 	ReasonVRAMServiceCreepWarn = "vram_service_creep_warn"
 
 	// v0.2.0 hard reasons
-	ReasonDiskOver98pct        = "disk_over_98pct"
-	ReasonGPUECCUncorrected    = "gpu_ecc_uncorrected"
-	ReasonVLLMRequiredDown     = "vllm_required_down"
-	ReasonRDMAPortDown         = "rdma_port_down"
-	ReasonRDMAPeermemMissing   = "rdma_peermem_missing"
-	ReasonRDMACollectorStale   = "rdma_collector_stale"
-	ReasonTrainingInProgress   = "training_in_progress"
+	ReasonDiskOver98pct      = "disk_over_98pct"
+	ReasonGPUECCUncorrected  = "gpu_ecc_uncorrected"
+	ReasonVLLMRequiredDown   = "vllm_required_down"
+	ReasonRDMAPortDown       = "rdma_port_down"
+	ReasonRDMAPeermemMissing = "rdma_peermem_missing"
+	ReasonRDMACollectorStale = "rdma_collector_stale"
+	ReasonTrainingInProgress = "training_in_progress"
 	// v0.2.0 soft reasons
 	ReasonDiskOver90pct        = "disk_over_90pct"
 	ReasonClockSkewHigh        = "clock_skew_high"

@@ -23,7 +23,7 @@ type serviceReq struct {
 }
 
 type serviceResp struct {
-	Status string          `json:"status"`
+	Status          string `json:"status"`
 	services.Result `json:",inline"`
 }
 

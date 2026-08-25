@@ -11,13 +11,13 @@ import "context"
 // driver_version, clocks, throttle reasons, ECC, MIG and NVLink fields
 // (all `omitempty` so v0.1.x backends ignore them safely).
 type GPU struct {
-	Index             int       `json:"index"`
-	UUID              string    `json:"uuid,omitempty"`
-	Name              string    `json:"name"`
-	DriverVersion     string    `json:"driver_version,omitempty"`
-	CUDAVersion       string    `json:"cuda_version,omitempty"`
-	ComputeCapability string    `json:"compute_capability,omitempty"`
-	PCIBusID          string    `json:"pci_bus_id,omitempty"`
+	Index             int    `json:"index"`
+	UUID              string `json:"uuid,omitempty"`
+	Name              string `json:"name"`
+	DriverVersion     string `json:"driver_version,omitempty"`
+	CUDAVersion       string `json:"cuda_version,omitempty"`
+	ComputeCapability string `json:"compute_capability,omitempty"`
+	PCIBusID          string `json:"pci_bus_id,omitempty"`
 
 	VRAMTotalMB int64   `json:"vram_total_mb"`
 	VRAMUsedMB  int64   `json:"vram_used_mb"`
@@ -59,14 +59,14 @@ type GPU struct {
 
 // NVLink describes the inter-GPU NVLink fabric.
 type NVLink struct {
-	Supported bool        `json:"supported"`
+	Supported bool         `json:"supported"`
 	Links     []NVLinkLink `json:"links,omitempty"`
 }
 
 // NVLinkLink is one physical link.
 type NVLinkLink struct {
 	Link        int    `json:"link"`
-	State       string `json:"state"`            // Up | Down
+	State       string `json:"state"` // Up | Down
 	SpeedGBPerS int    `json:"speed_gb_s,omitempty"`
 	PeerGPU     *int   `json:"peer_gpu_index,omitempty"`
 }

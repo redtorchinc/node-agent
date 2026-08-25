@@ -142,10 +142,10 @@ func (m *Manager) Training() *health.TrainingState {
 
 // EnterRequest is the body of POST /actions/training-mode {enter: true, ...}.
 type EnterRequest struct {
-	RunID                string
-	ExpectedDurationS    int64
-	ReleaseOllamaModels  []string
-	RestoreOnExit        bool
+	RunID               string
+	ExpectedDurationS   int64
+	ReleaseOllamaModels []string
+	RestoreOnExit       bool
 }
 
 // Enter records the training-mode entry and persists the state file. The
@@ -168,10 +168,10 @@ func (m *Manager) Enter(req EnterRequest) error {
 		return fmt.Errorf("already in training_mode with run_id=%s", m.training.RunID)
 	}
 	s := &Snapshot{
-		RunID:                 req.RunID,
-		EnteredAt:             time.Now().Unix(),
-		ExpectedDurationS:     req.ExpectedDurationS,
-		OllamaModelsReleased:  append([]string(nil), req.ReleaseOllamaModels...),
+		RunID:                req.RunID,
+		EnteredAt:            time.Now().Unix(),
+		ExpectedDurationS:    req.ExpectedDurationS,
+		OllamaModelsReleased: append([]string(nil), req.ReleaseOllamaModels...),
 	}
 	if req.RestoreOnExit {
 		s.OllamaModelsToRestore = append([]string(nil), req.ReleaseOllamaModels...)

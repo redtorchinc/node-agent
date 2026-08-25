@@ -91,7 +91,7 @@ func (s *Server) handleNetworkSockets(w http.ResponseWriter, r *http.Request) {
 
 type flowsResp struct {
 	netEnvelope
-	WindowS int              `json:"window_s"`
+	WindowS int               `json:"window_s"`
 	Items   []netown.FlowItem `json:"items"`
 }
 

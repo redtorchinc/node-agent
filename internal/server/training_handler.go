@@ -12,22 +12,22 @@ import (
 
 // trainingReq is the body for POST /actions/training-mode.
 type trainingReq struct {
-	Enter                bool     `json:"enter"`
-	RunID                string   `json:"run_id"`
-	ExpectedDurationS    int64    `json:"expected_duration_s"`
-	ReleaseOllamaModels  []string `json:"release_ollama_models"`
-	RestoreOnExit        *bool    `json:"restore_on_exit"`
+	Enter               bool     `json:"enter"`
+	RunID               string   `json:"run_id"`
+	ExpectedDurationS   int64    `json:"expected_duration_s"`
+	ReleaseOllamaModels []string `json:"release_ollama_models"`
+	RestoreOnExit       *bool    `json:"restore_on_exit"`
 }
 
 type trainingResp struct {
-	Status          string   `json:"status"`
-	Mode            string   `json:"mode"`
-	RunID           string   `json:"run_id,omitempty"`
-	PreviousRunID   string   `json:"previous_run_id,omitempty"`
-	EnteredAt       int64    `json:"entered_at,omitempty"`
-	DurationS       int64    `json:"duration_s,omitempty"`
-	ModelsReleased  []string `json:"models_released,omitempty"`
-	TookMS          int64    `json:"took_ms"`
+	Status         string   `json:"status"`
+	Mode           string   `json:"mode"`
+	RunID          string   `json:"run_id,omitempty"`
+	PreviousRunID  string   `json:"previous_run_id,omitempty"`
+	EnteredAt      int64    `json:"entered_at,omitempty"`
+	DurationS      int64    `json:"duration_s,omitempty"`
+	ModelsReleased []string `json:"models_released,omitempty"`
+	TookMS         int64    `json:"took_ms"`
 }
 
 func (s *Server) handleTrainingMode(w http.ResponseWriter, r *http.Request) {

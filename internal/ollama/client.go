@@ -54,10 +54,10 @@ type Client struct {
 
 	now func() time.Time // overridable in tests
 
-	mu        sync.Mutex
-	cached    *Info
-	cachedAt  time.Time
-	cacheTTL  time.Duration
+	mu       sync.Mutex
+	cached   *Info
+	cachedAt time.Time
+	cacheTTL time.Duration
 }
 
 // NewClient returns a Client targeting the given endpoint (e.g. http://localhost:11434).

@@ -1,9 +1,9 @@
 // Package vllm probes a local vLLM server and surfaces it as a
 // platforms.Report. Two endpoints are consulted:
 //
-//   GET /v1/models     — OpenAI-compatible model list (the "is up" probe)
-//   GET /metrics       — Prometheus text format with vllm:* series for per-model
-//                        queue depth, KV cache, latency histograms, throughput
+//	GET /v1/models     — OpenAI-compatible model list (the "is up" probe)
+//	GET /metrics       — Prometheus text format with vllm:* series for per-model
+//	                     queue depth, KV cache, latency histograms, throughput
 //
 // Both are cached on a 5s TTL so a hot /health loop doesn't hammer vLLM.
 // Latency histogram → percentile uses linear interpolation between bucket
@@ -34,11 +34,11 @@ type Detector struct {
 	http *http.Client
 	now  func() time.Time
 
-	mu        sync.Mutex
-	cached    *platforms.Report
-	cachedAt  time.Time
-	cacheTTL  time.Duration
-	lastProm  *promSnapshot // for rate computation (one previous scrape)
+	mu       sync.Mutex
+	cached   *platforms.Report
+	cachedAt time.Time
+	cacheTTL time.Duration
+	lastProm *promSnapshot // for rate computation (one previous scrape)
 }
 
 // New returns a detector for the given platform entry.
@@ -142,9 +142,9 @@ func (d *Detector) Probe(ctx context.Context) platforms.Report {
 //	{ "data": [{ "id": "...", "created": ..., ... }], "object": "list" }
 type modelsResp struct {
 	Data []struct {
-		ID       string `json:"id"`
-		Created  int64  `json:"created"`
-		OwnedBy  string `json:"owned_by"`
+		ID      string `json:"id"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
 		// vLLM-specific extras (best-effort; field names vary across versions).
 		MaxModelLen int    `json:"max_model_len"`
 		Quant       string `json:"quantization"`

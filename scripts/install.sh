@@ -20,6 +20,19 @@ BINARY="rt-node-agent"
 INSTALL_DIR="${RT_AGENT_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${RT_AGENT_VERSION:-latest}"
 
+# Pinned minisign public key for release-artifact verification.
+#
+# STILL A PLACEHOLDER: no project signing key has been generated yet, so no
+# release carries signatures. The placeholder is detected explicitly below
+# and skips verification. It is deliberately NOT handed to minisign — it
+# would fail every check, and that path calls err(), which would hard-abort
+# the install one-liner on every host that happens to have minisign
+# installed, the moment signatures started being published.
+#
+# To enable signing, follow docs/releasing.md and replace this value with
+# the real public key in the same commit that adds the secrets.
+PUBKEY="RWS_PLACEHOLDER_PUBKEY_REPLACE_AT_FIRST_SIGNED_RELEASE"
+
 err() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 info() { printf 'install.sh: %s\n' "$*"; }
 
@@ -62,22 +75,40 @@ info "downloading $asset ($os/$arch)"
 curl -fsSL -o "$tmp/$asset" "$url" || err "download failed: $url"
 
 # --- optional signature verification ---
-# When minisign is installed AND a .minisig asset is published, verify.
-# When either is missing, warn and continue (v0.1.0 releases are unsigned).
-if command -v minisign >/dev/null 2>&1; then
-  if curl -fsSL -o "$tmp/$asset.minisig" "$sig_url" 2>/dev/null; then
-    pubkey="RWS_PLACEHOLDER_PUBKEY_REPLACE_AT_FIRST_SIGNED_RELEASE"
-    printf '%s\n' "$pubkey" > "$tmp/rt-node-agent.pub"
-    if ! minisign -V -p "$tmp/rt-node-agent.pub" -m "$tmp/$asset" >/dev/null 2>&1; then
-      err "signature verification failed for $asset"
+# Three things must all hold to verify: a real pinned PUBKEY, minisign
+# installed, and a .minisig published for this asset.
+#
+# The policy is fail-OPEN on "signing isn't set up" and fail-CLOSED on
+# "signing is set up and the signature doesn't match". Getting that pairing
+# right matters: the placeholder branch exists precisely so enabling signing
+# can never turn into a fleet-wide install outage.
+case "$PUBKEY" in
+  RWS_PLACEHOLDER_PUBKEY_*)
+    info "release signing not configured yet (placeholder pubkey); skipping signature verification"
+    ;;
+  "")
+    # Not a signing state — the installer itself is broken. Fail closed with
+    # a diagnostic, rather than handing an empty key to minisign and
+    # reporting it as a signature mismatch.
+    err "PUBKEY is empty — this installer is misconfigured; refusing to install. Re-download install.sh from the release assets."
+    ;;
+  *)
+    if ! command -v minisign >/dev/null 2>&1; then
+      info "minisign not installed; skipping signature verification"
+    elif curl -fsSL -o "$tmp/$asset.minisig" "$sig_url" 2>/dev/null; then
+      printf '%s\n' "$PUBKEY" > "$tmp/rt-node-agent.pub"
+      if ! minisign -V -p "$tmp/rt-node-agent.pub" -m "$tmp/$asset" >/dev/null 2>&1; then
+        err "signature verification FAILED for $asset — refusing to install"
+      fi
+      info "signature verified"
+    else
+      # Unsigned older release, or an asset published before signing was
+      # switched on. Fail-open for backward compatibility; see the
+      # downgrade-window note in docs/releasing.md.
+      info "no signature published for this release; skipping verify"
     fi
-    info "signature verified"
-  else
-    info "no signature published for this release; skipping verify"
-  fi
-else
-  info "minisign not installed; skipping signature verification"
-fi
+    ;;
+esac
 
 # --- install binary ---
 chmod +x "$tmp/$asset"

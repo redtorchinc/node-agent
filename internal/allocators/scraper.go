@@ -20,11 +20,11 @@ import (
 
 // ServiceConfig is the per-service entry in config.yaml.
 type ServiceConfig struct {
-	Name              string `yaml:"name"`
-	URL               string `yaml:"url"`
-	ThresholdWarnMB   int64  `yaml:"threshold_warn_mb"`
-	ThresholdCritMB   int64  `yaml:"threshold_critical_mb"`
-	ScrapeIntervalS   int    `yaml:"scrape_interval_s"`
+	Name            string `yaml:"name"`
+	URL             string `yaml:"url"`
+	ThresholdWarnMB int64  `yaml:"threshold_warn_mb"`
+	ThresholdCritMB int64  `yaml:"threshold_critical_mb"`
+	ScrapeIntervalS int    `yaml:"scrape_interval_s"`
 
 	// OnlyWhenMode, if set, restricts scraping to ticks where the agent's
 	// mode matches. The typical use is "only_when_mode: training_mode" on
@@ -69,9 +69,9 @@ type response struct {
 // canonicalFields enumerates the fields owned by the agent. parseExtra
 // copies anything else into Scraped.Extra.
 var canonicalFields = map[string]struct{}{
-	"allocated_mb":      {},
-	"reserved_mb":       {},
-	"max_allocated_mb":  {},
+	"allocated_mb":     {},
+	"reserved_mb":      {},
+	"max_allocated_mb": {},
 }
 
 // Store holds the most recent scrape result per service. Safe for concurrent

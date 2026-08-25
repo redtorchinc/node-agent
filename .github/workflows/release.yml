@@ -61,19 +61,52 @@ jobs:
         run: |
           cd artifacts
           sha256sum rt-node-agent_* > SHA256SUMS
+      # Whether signing is configured, resolved in its own step.
+      #
+      # This used to be `if: ${{ env.MINISIGN_KEY != '' }}` on the sign step
+      # itself, with MINISIGN_KEY set in that same step's `env:` block. A
+      # step's own `env:` is NOT in scope for its own `if:`, so the
+      # expression read an undefined value, was always false, and NO RELEASE
+      # WAS EVER SIGNED. It skipped silently, which is why it went unnoticed.
+      #
+      # `secrets` is likewise not available in a step-level `if:`, so testing
+      # the secret directly there would not work either. Resolving it to an
+      # output sidesteps the context rules entirely, and logs the decision so
+      # an unsigned release is visible in the run rather than silent.
+      - name: signing status
+        id: signing
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          if [ -n "$MINISIGN_KEY" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+            echo 'release signing: ENABLED'
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'release signing: DISABLED (no MINISIGN_KEY secret configured)'
+            echo '::notice title=Unsigned release::No MINISIGN_KEY secret is set, so this release ships without minisign signatures. Artifacts still carry SHA256SUMS and build-provenance attestation. See docs/releasing.md to enable signing.'
+          fi
+
       - name: sign (minisign)
-        if: ${{ env.MINISIGN_KEY != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSPHRASE: ${{ secrets.MINISIGN_PASSPHRASE }}
         run: |
+          # No `|| true` anywhere below: if signing is configured and then
+          # fails, the release must fail rather than quietly publish
+          # unsigned artifacts. That silent-fallback shape is what hid the
+          # original bug.
+          sudo apt-get update
           sudo apt-get install -y minisign
+          umask 077
           printf '%s\n' "$MINISIGN_KEY" > /tmp/minisign.key
           cd artifacts
           for f in rt-node-agent_* SHA256SUMS; do
             echo "$MINISIGN_PASSPHRASE" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.minisig"
           done
           shred -u /tmp/minisign.key
+          echo "signed $(ls -1 ./*.minisig | wc -l) artifacts"
       - name: attest
         uses: actions/attest-build-provenance@v4
         with:

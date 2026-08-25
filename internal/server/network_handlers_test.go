@@ -71,12 +71,12 @@ func TestNetworkSockets_EnvelopeAndRedaction(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		TsUnixNS     int64                `json:"ts_unix_ns"`
-		Hostname     string               `json:"hostname"`
-		AgentVersion string               `json:"agent_version"`
-		Source       string               `json:"source"`
-		Warnings     []string             `json:"warnings"`
-		Items        []netown.SocketItem  `json:"items"`
+		TsUnixNS     int64               `json:"ts_unix_ns"`
+		Hostname     string              `json:"hostname"`
+		AgentVersion string              `json:"agent_version"`
+		Source       string              `json:"source"`
+		Warnings     []string            `json:"warnings"`
+		Items        []netown.SocketItem `json:"items"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -116,8 +116,8 @@ func TestNetworkFlows_Window(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		WindowS int                `json:"window_s"`
-		Items   []netown.FlowItem  `json:"items"`
+		WindowS int               `json:"window_s"`
+		Items   []netown.FlowItem `json:"items"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -165,9 +165,9 @@ func TestNetworkResolve_HappyAndValidation(t *testing.T) {
 
 	// Missing required params → 400.
 	for _, q := range []string{
-		"?proto=tcp&local_addr=1.2.3.4&local_port=1&remote_addr=5.6.7.8", // no remote_port
+		"?proto=tcp&local_addr=1.2.3.4&local_port=1&remote_addr=5.6.7.8",     // no remote_port
 		"?local_addr=1.2.3.4&local_port=1&remote_addr=5.6.7.8&remote_port=2", // no proto
-		"?proto=tcp&local_port=1&remote_addr=5.6.7.8&remote_port=2",      // no local_addr
+		"?proto=tcp&local_port=1&remote_addr=5.6.7.8&remote_port=2",          // no local_addr
 	} {
 		if w := netGet(s, "/network/resolve"+q, "test-token"); w.Code != http.StatusBadRequest {
 			t.Errorf("GET %s = %d, want 400", q, w.Code)

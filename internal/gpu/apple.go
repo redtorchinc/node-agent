@@ -23,10 +23,10 @@ func NewAppleSilicon() *AppleSilicon { return &AppleSilicon{} }
 
 type spDisplays struct {
 	Displays []struct {
-		Name     string `json:"_name"`
-		Model    string `json:"sppci_model"`
+		Name       string `json:"_name"`
+		Model      string `json:"sppci_model"`
 		VRAMShared string `json:"spdisplays_vram_shared"`
-		Cores    string `json:"sppci_cores"`
+		Cores      string `json:"sppci_cores"`
 	} `json:"SPDisplaysDataType"`
 }
 

@@ -9,6 +9,8 @@ units.
 [ARCHITECTURE.md](./ARCHITECTURE.md) (project map) ·
 [spec/V0_2_0_PLAN.md](./spec/V0_2_0_PLAN.md) (v0.2.0 design) ·
 [docs/api/network-flows.md](./docs/api/network-flows.md) (network flow ownership API) ·
+[docs/api/ray.md](./docs/api/ray.md) (Ray / tensor-parallel group membership) ·
+[docs/releasing.md](./docs/releasing.md) (cutting a release, artifact verification) ·
 [docs/](./docs/) (operator reference).
 
 ## Install
@@ -35,12 +37,31 @@ curl -fsSL https://github.com/redtorchinc/node-agent/releases/latest/download/in
 iwr -useb https://github.com/redtorchinc/node-agent/releases/latest/download/install.ps1 | iex
 ```
 
-### Verify
+### Verify the agent is up
 
 ```sh
 curl -s localhost:11435/version
 curl -s localhost:11435/health | jq .
 ```
+
+### Verify the download
+
+Every release publishes `SHA256SUMS` alongside the binaries, plus a GitHub
+build-provenance attestation:
+
+```sh
+gh release download v0.3.4 -p 'rt-node-agent_linux_arm64' -p SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+
+gh attestation verify rt-node-agent_linux_arm64 --repo redtorchinc/node-agent
+```
+
+**Releases are not minisign-signed yet.** No project signing key exists, so
+no `.minisig` assets are published and `install.sh` skips signature
+verification (it pins a placeholder pubkey and detects it explicitly, so
+enabling signing later can't turn into a fleet-wide install failure). Use
+the checksum and attestation above in the meantime. Procedure for turning
+signing on: [docs/releasing.md](docs/releasing.md).
 
 Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 
@@ -48,7 +69,7 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /health` | none (LAN) | Real CPU/mem/swap, GPU per-device, disk, network, **time sync (incl. high-precision `now_unix_ns` and an agent-driven NTP probe against `time.cloudflare.com` by default — the case-manager subtracts these across nodes to surface cross-node offsets)**, per-platform model state (Ollama + vLLM), allowlisted service state, RDMA fabric (Linux DGX), `degraded_reasons`. The case-manager's `rank_nodes()` consumes the reasons list directly. |
+| `GET /health` | none (LAN) | Real CPU/mem/swap, GPU per-device, disk, network, **time sync (incl. high-precision `now_unix_ns` and an agent-driven NTP probe against `time.cloudflare.com` by default — the case-manager subtracts these across nodes to surface cross-node offsets)**, per-platform model state (Ollama + vLLM), allowlisted service state, RDMA fabric (Linux DGX), Ray / tensor-parallel group membership (`ray`, omitted when Ray isn't running), `degraded_reasons`. The case-manager's `rank_nodes()` consumes the reasons list directly. |
 | `GET /capabilities` | none (LAN) | What this build can do on this OS — used by the dispatcher for feature detection. |
 | `GET /version` | none (LAN) | Version / git SHA / build time. |
 | `GET /metrics` | none (LAN) | Prometheus text format (behind `metrics_enabled: true`). |
@@ -60,7 +81,8 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 | `POST /actions/training-mode` | Bearer | Coordinate inference ↔ training transitions. |
 
 Field-by-field docs: [docs/api/](docs/api/). Network flow ownership spec:
-[docs/api/network-flows.md](docs/api/network-flows.md). Security model:
+[docs/api/network-flows.md](docs/api/network-flows.md). Ray / tensor-parallel
+group membership: [docs/api/ray.md](docs/api/ray.md). Security model:
 [docs/remote-actions.md](docs/remote-actions.md).
 
 ## Configuration
@@ -166,6 +188,13 @@ rt-node-agent config migrate # back up config.yaml → .bak, merge in new schema
 rt-node-agent install        # register as native service (Administrator/root)
 rt-node-agent uninstall      # deregister
 ```
+
+## Releasing
+
+Tag-driven: pushing a `v*` tag cross-compiles five targets, checksums them,
+attests build provenance, and publishes a GitHub release. Procedure,
+pre-release checklist, and the signing setup that is still outstanding:
+[docs/releasing.md](docs/releasing.md).
 
 ## Public-repo hygiene
 

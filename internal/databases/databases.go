@@ -47,9 +47,9 @@ func sortDatabases(s []Database) {
 const cacheTTL = 30 * time.Second
 
 var (
-	cacheMu   sync.Mutex
-	cached    []Database
-	cachedAt  time.Time
+	cacheMu  sync.Mutex
+	cached   []Database
+	cachedAt time.Time
 )
 
 // Database is one entry in /health.databases[].

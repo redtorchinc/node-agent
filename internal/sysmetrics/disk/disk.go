@@ -11,11 +11,11 @@ import (
 
 // Info is one entry under /health.disk[].
 type Info struct {
-	Path     string  `json:"path"`
-	FSType   string  `json:"fstype,omitempty"`
-	TotalGB  float64 `json:"total_gb"`
-	UsedGB   float64 `json:"used_gb"`
-	UsedPct  float64 `json:"used_pct"`
+	Path      string  `json:"path"`
+	FSType    string  `json:"fstype,omitempty"`
+	TotalGB   float64 `json:"total_gb"`
+	UsedGB    float64 `json:"used_gb"`
+	UsedPct   float64 `json:"used_pct"`
 	IOPSRead  *uint64 `json:"iops_read,omitempty"`
 	IOPSWrite *uint64 `json:"iops_write,omitempty"`
 }

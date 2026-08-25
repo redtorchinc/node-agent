@@ -42,7 +42,10 @@ try {
     $dest = Join-Path $tmp.FullName $asset
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
 
-    # TODO(M11): minisign verification on Windows once a pubkey is pinned.
+    # No signature verification on Windows. Blocked on the same thing as
+    # the sh installer: no project signing key exists yet, so there is no
+    # pubkey to pin (scripts/install.sh carries a placeholder that
+    # deliberately skips verification). See docs/releasing.md.
 
     # --- install binary ---
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null

@@ -6,6 +6,36 @@ on:
   pull_request:
 
 jobs:
+  # Formatting is checked once, on Linux only — gofmt output is
+  # platform-independent, so running it in the OS matrix would just report
+  # the same finding three times.
+  #
+  # Its own job rather than a step in `test` so a formatting nit reads as a
+  # formatting failure instead of looking like a broken build on three
+  # platforms.
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.14'
+          cache: true
+      - name: gofmt
+        # `gofmt -l` exits 0 even when it lists files, so the exit status has
+        # to come from whether the list is empty. Printing the diff makes the
+        # fix obvious from the log without a local run.
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "::error title=gofmt::These files need gofmt. Run: gofmt -w ./cmd ./internal"
+            echo "$unformatted"
+            echo '--- diff ---'
+            gofmt -d ./cmd ./internal
+            exit 1
+          fi
+          echo "gofmt clean"
+
   test:
     strategy:
       fail-fast: false

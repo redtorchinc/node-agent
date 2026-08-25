@@ -20,8 +20,9 @@ The script:
    - Generates a fresh Bearer token in `/etc/rt-node-agent/token` **only
      if no token already exists**. Reinstalls preserve the existing token.
    - **Linux only:** drops `/etc/sudoers.d/rt-node-agent` scoping the
-     `rt-agent` user to `systemctl {start,stop,restart,status,show}` on
-     `rt-vllm-*.service` units.
+     `rt-agent` user to `systemctl {start,stop,restart}` on
+     `rt-vllm-*.service` units. `status` isn't granted because it doesn't
+     need to be — systemd serves state queries unprivileged.
    - **macOS only:** allows incoming connections to the binary through
      the Application Firewall.
    - Registers + starts the service (systemd / launchd).

@@ -217,11 +217,17 @@ func systemctlArgv(args ...string) (string, []string) {
 // Without this the operator gets a bare 500 carrying `sudo: a password is
 // required` and has to work backwards to the drop-in themselves — which is
 // exactly the debugging issue #28 describes.
+//
+// Each phrase below is already sudo-specific, so there is deliberately no
+// broader "does this output mention sudo at all" pre-filter. An earlier
+// version had one, and it rejected the single most important case: sudo's
+// spec-mismatch message is
+//
+//	Sorry, user rt-agent is not allowed to execute '…' as root.
+//
+// which names neither "sudo" nor "password". The CI Linux job caught it.
 func isSudoAuthFailure(out []byte) bool {
 	s := strings.ToLower(string(out))
-	if !strings.Contains(s, "sudo") && !strings.Contains(s, "password") {
-		return false
-	}
 	return strings.Contains(s, "a password is required") ||
 		strings.Contains(s, "a terminal is required") ||
 		strings.Contains(s, "no askpass program") ||

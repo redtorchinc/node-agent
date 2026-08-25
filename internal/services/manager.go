@@ -39,11 +39,22 @@ var AllActions = []Action{ActionStart, ActionStop, ActionRestart, ActionStatus}
 // Errors returned by Manager.Do. Distinct types so the HTTP layer can map
 // them to specific status codes without string matching.
 var (
-	ErrUnitNotAllowed  = errors.New("unit not in allowlist")
+	ErrUnitNotAllowed   = errors.New("unit not in allowlist")
 	ErrActionNotAllowed = errors.New("action not permitted for this unit")
 	ErrUnknownAction    = errors.New("unknown action")
 	ErrUnitNotFound     = errors.New("unit not known to systemd")
 	ErrUnsupported      = errors.New("service control not supported on this OS")
+
+	// ErrSudoDenied means the unit and action were both allowed, but sudo
+	// refused to elevate — almost always a sudoers drop-in whose command
+	// specs don't match the agent's argv (issue #28), not a caller problem.
+	//
+	// Deliberately NOT given its own case in mapServiceErr: it falls to the
+	// existing 500, whose body is already freeform, so the diagnostic
+	// reaches the operator without adding a status code the backend was
+	// never told to expect. Promoting it would be a contract change — see
+	// V0_2_0_PLAN.md §A3.
+	ErrSudoDenied = errors.New("sudo refused to elevate systemctl")
 )
 
 // Result is what /actions/service returns to the caller.

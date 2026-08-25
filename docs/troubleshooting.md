@@ -57,6 +57,47 @@ which blocks `sudo` entirely (the third command above fails with "the
 'no new privileges' flag is set"). v0.3.1 removed the directive —
 re-run the install one-liner to re-render the unit.
 
+### v0.3.2 and earlier: "sudo refused to elevate systemctl"
+
+On v0.3.0–v0.3.2 the drop-in was present and valid, `sudo -n -l` listed
+the commands, and *every* service action still failed with `sudo: a
+password is required`. The cause was an argv mismatch, not a permissions
+problem (issue #28). The agent invoked:
+
+```
+/usr/bin/sudo -n /bin/systemctl --no-pager --no-ask-password start rt-vllm-x.service
+```
+
+while the drop-in granted only:
+
+```
+/bin/systemctl start rt-vllm-[a-zA-Z0-9_-]*.service
+```
+
+**sudo matches command specs argument-by-argument.** The two flags ahead
+of the verb meant no spec matched, so sudo fell through to asking for a
+password, and `-n` turned that into a hard failure. It affected all four
+actions on every unit, which is the tell: a genuine allowlist or unit
+problem fails for *some* input, not all of it.
+
+Fixed by dropping the flags from the sudo path (they only matter on a
+TTY, and output is always captured into a buffer) and by moving `status`
+and `show` off sudo entirely — both are read-only and systemd serves them
+unprivileged. Re-run the install one-liner to pick up the new binary and
+the trimmed drop-in.
+
+From that release on, this failure mode reports itself: the 500 body
+names the drop-in and says the specs must match the agent's argv, instead
+of passing through the bare `sudo: a password is required`.
+
+To confirm which side is at fault on any version, run the agent's exact
+argv by hand as the service user — if this succeeds but the API call
+doesn't, the problem is the agent, not sudoers:
+
+```
+sudo -u rt-agent sudo -n /bin/systemctl start rt-vllm-<model>.service
+```
+
 ## Linux: /network/* returns `partial: true` / bare tuples
 
 Sockets come back without `pid` / `process_name` / `user` / `service`,

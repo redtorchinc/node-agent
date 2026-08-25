@@ -111,6 +111,35 @@ crypto/tls, GO-2026-6089 + GO-2026-5026 net/http, GO-2026-5972
 encoding/asn1). Keep them in lockstep: bumping go.mod alone does not
 green the CI job, and bumping the workflows alone does not change what
 the release binary is built with.
+v0.3.3 fixes `POST /actions/service` being broken for *every* unit and
+action since v0.3.0 (issue #28) — a sudoers argv mismatch, not a
+permissions problem. The agent invoked `sudo -n /bin/systemctl
+--no-pager --no-ask-password <verb> <unit>` while the drop-in granted
+flagless specs (`/bin/systemctl start rt-vllm-*.service`); **sudo
+matches command specs argument-by-argument**, so the two flags ahead of
+the verb meant no spec matched, sudo fell through to requiring a
+password, and `-n` made that a hard failure. Note this was masked
+until v0.3.1 removed `NoNewPrivileges=true`, which had been failing the
+same path earlier for a different reason. Fixes: the sudo branch of
+`systemctlArgv` is now flagless (the flags only matter on a TTY and
+output is always captured to a buffer); `status` and `show` moved off
+sudo entirely since systemd serves state queries unprivileged — which
+also retired two drop-in specs that never matched anyway (`show`
+appends `--property=A,B,C` after the unit, and those commas are spec
+separators in sudoers); the drop-in is trimmed to
+`{start,stop,restart}` × `{/bin,/usr/bin}`; and the systemctl path is
+resolved from a *closed* two-entry list so it can never diverge from
+what the drop-in grants. `ErrSudoDenied` now makes this failure
+self-describing — the 500 body names the drop-in instead of passing
+through a bare `sudo: a password is required`. It is deliberately NOT
+given its own status code in `mapServiceErr`: that would be a wire
+change (V0_2_0_PLAN.md §A3). **The argv↔drop-in coupling is
+load-bearing and now pinned from both sides** by tests in
+`internal/services/systemd_linux_test.go` and
+`internal/service/sudoers_linux_test.go` — never add a flag to the sudo
+branch without adding it to the drop-in. Picking this up on a node
+requires re-running `sudo rt-node-agent install` (rewrites the drop-in),
+not just a binary swap.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading.

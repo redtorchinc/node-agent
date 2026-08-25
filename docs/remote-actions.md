@@ -38,10 +38,21 @@ Start/stop/restart/status of one of N pre-existing systemd units.
    inject (and would fail the allowlist check first anyway).
 4. **Sudoers drop-in scoped to a name pattern.** On Linux, the installer
    places `/etc/sudoers.d/rt-node-agent` granting the `rt-agent` user
-   `NOPASSWD` on `systemctl {start,stop,restart,status,show}` *only* for
-   units matching `rt-vllm-[a-zA-Z0-9_-]*.service`. **Operators must
-   name their vLLM units accordingly.** A misconfigured `services.allowed`
-   entry that names `sshd.service` still cannot escalate — sudo refuses.
+   `NOPASSWD` on `systemctl {start,stop,restart}` *only* for units
+   matching `rt-vllm-[a-zA-Z0-9_-]*.service`. **Operators must name their
+   vLLM units accordingly.** A misconfigured `services.allowed` entry that
+   names `sshd.service` still cannot escalate — sudo refuses.
+
+   The `status` action is *not* in that list, and does not need to be:
+   systemd serves state queries to any local user, so the agent runs
+   `status` and `show` directly rather than through sudo. Keeping them off
+   the sudo path narrows the grant to the three verbs that actually
+   require root.
+
+   Each spec is deliberately flagless, matching the agent's argv exactly.
+   sudo compares command specs argument-by-argument, so this coupling is
+   load-bearing — see the note on `systemctlArgv` in
+   `internal/services/systemd_linux.go`.
 
 Naming convention: `rt-vllm-<model>.service`. Examples:
 

@@ -61,7 +61,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux, darwin, windows]
+        # The category is explicit per target, not derived from goos, because
+        # linux must keep the historical bare `gosec` category. GitHub only
+        # marks a code-scanning alert fixed when a scan under the SAME
+        # category stops reporting it — so renaming every category orphans
+        # the entire pre-matrix backlog: nothing reports under `gosec` any
+        # more, and 41 alerts stay open forever with no job able to close
+        # them. Adding categories for new targets is safe; renaming an
+        # existing one is not.
+        include:
+          - goos: linux
+            category: gosec
+          - goos: darwin
+            category: gosec-darwin
+          - goos: windows
+            category: gosec-windows
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -90,9 +104,10 @@ jobs:
         if: always()
         with:
           sarif_file: gosec.sarif
-          # Distinct category per target, or each upload would overwrite the
-          # previous one and only the last GOOS would survive in the tab.
-          category: gosec-${{ matrix.goos }}
+          # Distinct category per target, or each upload overwrites the
+          # previous one and only the last GOOS survives in the tab. See the
+          # matrix comment for why linux's is the bare `gosec`.
+          category: ${{ matrix.category }}
 
   gitleaks:
     name: gitleaks

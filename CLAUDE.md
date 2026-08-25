@@ -256,6 +256,15 @@ hid every finding in `launchd.go`, `winsvc.go`, and the `*_darwin.go`
 files. Each target uploads under its own SARIF category; they would
 otherwise overwrite each other.
 
+**Never rename an existing SARIF category.** GitHub only marks a
+code-scanning alert fixed when a scan *under the same category* stops
+reporting it. Renaming orphans every alert filed under the old name —
+they stay open forever with no job able to close them. That is why the
+linux target keeps the bare `gosec` category while the new targets get
+`gosec-darwin` / `gosec-windows`: adding a category is safe, renaming one
+is not. (Learned the hard way — the matrix change initially renamed all
+three and left 41 unclosable alerts behind.)
+
 Suppressions carry `#nosec <rule> -- <reason>`. **Treat a bare `#nosec`
 with no stated reason as untriaged**, not as reviewed. Two suppressions
 are load-bearing rather than cosmetic and should not be "cleaned up":

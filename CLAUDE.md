@@ -98,11 +98,19 @@ sampler-provided ProcessName fallback used when the owning process
 exits before gopsutil enrichment. Linux needed no code change — procfs
 attributes all states including SYN_SENT (verified on arm64 GB10-class
 and x86_64 Ubuntu nodes, cross-user, with closed sockets retained in
-/network/flows). Also pins `toolchain go1.25.12` in go.mod for
-GO-2026-5856; the workflow `go-version: '1.25.11'` pins still want a
-matching bump by someone with workflow-scope credentials. The
+/network/flows). Also pinned `toolchain go1.25.12` in go.mod for
+GO-2026-5856. The
 remaining sub-poll-interval capture gap is issue #27 (event-driven
 sources — EndpointSecurity / eBPF — deliberately deferred).
+**Toolchain pins are now unified at go1.25.14** — go.mod `toolchain`
+*and* all five workflow `go-version` pins move together. They had
+drifted (go.mod on 1.25.12, workflows on 1.25.11), which is why the
+daily `security` job went red 2026-08-19 → 08-25 on five stdlib
+advisories fixed in go1.25.13 (GO-2026-6218 net/url, GO-2026-6090
+crypto/tls, GO-2026-6089 + GO-2026-5026 net/http, GO-2026-5972
+encoding/asn1). Keep them in lockstep: bumping go.mod alone does not
+green the CI job, and bumping the workflows alone does not change what
+the release binary is built with.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading.

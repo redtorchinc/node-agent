@@ -167,6 +167,37 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.4** is a release-integrity + hygiene pass, no wire change.
+Release signing had **never run**: the sign step was gated on
+`if: ${{ env.MINISIGN_KEY != '' }}` with the secret set in that same
+step's `env:` block, and a step's own `env:` is not in scope for its own
+`if:` — so it read undefined, was always false, and skipped silently on
+every release (`secrets` is not available in a step-level `if:` either,
+so testing the secret there would also have failed). It now resolves to
+a step output and **logs the decision**, so an unsigned release is
+visible instead of silent. The important half was second, though:
+`scripts/install.sh` pins a **placeholder** pubkey and a verification
+failure takes the `err()` path, which aborts the install — so fixing the
+workflow condition alone would have meant that the moment a
+`MINISIGN_KEY` was added, `curl | sh` hard-failed on every host with
+minisign installed. A fleet-wide install outage caused by enabling
+security. The placeholder is now detected by prefix and never handed to
+minisign; policy is deliberately asymmetric — **fail open when signing
+isn't set up, fail closed when it is set up and doesn't verify**, and a
+hard error on an empty `PUBKEY` (a broken installer, not a signing
+state). Signing is still OFF: no keypair exists, and generating one is
+deliberately out of scope for an agent — it belongs on a trusted machine
+outside CI, and public-repo hygiene forbids a signing key entering this
+repo. New **docs/releasing.md** carries the release procedure, the exact
+steps to enable signing (pubkey commit must land *with* the secrets, or
+there's a window where signatures publish but can't be verified), the
+known fail-open downgrade window, and a pre-release checklist. Also:
+CI now gates on `gofmt` (its own Linux-only job — `gofmt -l` exits 0
+even when it lists files, so the gate keys off whether the list is
+empty), and the 14 files that had drifted are formatted. Checked
+specifically that the realignment did not detach any `#nosec <rule> --
+reason` comment from its line: gosec stays at 0 issues with 24/23/14
+suppressions.
 Note: the deprecated legacy `ollama_endpoint` key was NOT removed in
 v0.3.0 despite older comments promising that — removal stays deferred
 so v0.1.x configs keep loading. (`examples/config.yaml` used to claim it

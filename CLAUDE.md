@@ -177,6 +177,17 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.5** extends the sudoers drop-in to `rt-vllm@<model>.service`
+template instances, no wire change. The GB10 fleet serves through one
+`rt-vllm@.service` template plus an `/etc/default/rt-vllm-<model>` env
+file per model, and the hyphen-only `rt-vllm-[a-zA-Z0-9_-]*.service`
+pattern cannot match the `@` — so an allowlisted instance validated
+cleanly and then failed at runtime with `sudo: a password is required`.
+Same drift class as #28, between the drop-in and the fleet's unit
+convention instead of the agent's argv. The rail is unchanged in kind:
+only rt-vllm units are reachable. Tests now pin every path × verb ×
+pattern combination; re-run `rt-node-agent install` (which rewrites the
+drop-in) after upgrading.
 **v0.3.4** is a release-integrity + hygiene pass, no wire change.
 Release signing had **never run**: the sign step was gated on
 `if: ${{ env.MINISIGN_KEY != '' }}` with the secret set in that same

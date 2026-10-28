@@ -77,7 +77,7 @@ Full install / upgrade / uninstall flow: [docs/install.md](docs/install.md).
 | `GET /network/flows` | Bearer | Rolling window of live + recently-closed socket ownership for joining against gateway NetFlow. |
 | `GET /network/resolve` | Bearer | One gateway 5-tuple → best local owner, with deterministic per-tier confidence. |
 | `POST /actions/unload-model` | Bearer | Free an Ollama model. |
-| `POST /actions/service` | Bearer | Start/stop/restart allowlisted systemd units (typically `rt-vllm-*.service`). |
+| `POST /actions/service` | Bearer | Start/stop/restart allowlisted systemd units (`rt-vllm-*.service` or `rt-vllm@<model>.service` template instances). |
 | `POST /actions/training-mode` | Bearer | Coordinate inference ↔ training transitions. |
 
 Field-by-field docs: [docs/api/](docs/api/). Network flow ownership spec:

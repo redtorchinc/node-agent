@@ -21,7 +21,8 @@ The script:
      if no token already exists**. Reinstalls preserve the existing token.
    - **Linux only:** drops `/etc/sudoers.d/rt-node-agent` scoping the
      `rt-agent` user to `systemctl {start,stop,restart}` on
-     `rt-vllm-*.service` units. `status` isn't granted because it doesn't
+     `rt-vllm-*.service` units and `rt-vllm@<model>.service` template
+     instances. `status` isn't granted because it doesn't
      need to be — systemd serves state queries unprivileged.
    - **macOS only:** allows incoming connections to the binary through
      the Application Firewall.

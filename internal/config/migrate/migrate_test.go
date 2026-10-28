@@ -332,3 +332,82 @@ func TestForceReset_NoExistingFile_WritesDefaultsOnly(t *testing.T) {
 		t.Errorf("default file should exist after ForceReset, got %v", err)
 	}
 }
+
+// v2DefaultServicesCommented mirrors the REAL embedded default: `services:`
+// (like rdma, disk, training_mode) is shipped commented out, so it is absent
+// from the parsed default tree. v2Default above had it uncommented, which is
+// why the migrator's dropping of an operator's allowlist went unnoticed.
+const v2DefaultServicesCommented = `config_version: 2
+port: 11435
+bind: 0.0.0.0
+token_file: /etc/rt-node-agent/token
+metrics_enabled: false
+
+platforms:
+  vllm:
+    enabled: auto
+    endpoint: http://localhost:8000
+
+# services:
+#   manager: systemd
+#   allowed: []
+
+service_allocators: []
+`
+
+const operatorAllowlist = `
+services:
+  manager: systemd
+  allowed:
+    - name: rt-vllm@model-a.service
+      actions: [start, stop, restart, status]
+rdma:
+  enabled: auto
+`
+
+func TestMigrate_OptionalKeysSurviveMerge(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	// v1Existing lacks config_version / platforms, so a merge happens.
+	if err := os.WriteFile(cfg, []byte(v1Existing+operatorAllowlist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Migrate(cfg, v2DefaultServicesCommented)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if res.Action != ActionMerged {
+		t.Fatalf("Action = %q, want %q", res.Action, ActionMerged)
+	}
+	for _, k := range res.DroppedKeys {
+		if k == "services" || k == "rdma" {
+			t.Errorf("optional key %q reported as dropped: %v", k, res.DroppedKeys)
+		}
+	}
+	live, _ := os.ReadFile(cfg)
+	for _, want := range []string{"rt-vllm@model-a.service", "rdma:", "enabled: auto"} {
+		if !strings.Contains(string(live), want) {
+			t.Errorf("merged config lost %q:\n%s", want, live)
+		}
+	}
+}
+
+func TestMigrate_OptionalKeyAloneIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	current := v2DefaultServicesCommented + operatorAllowlist
+	if err := os.WriteFile(cfg, []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Migrate(cfg, v2DefaultServicesCommented)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if res.Action != ActionNoChange {
+		t.Fatalf("Action = %q, want %q (an optional key is not schema drift)", res.Action, ActionNoChange)
+	}
+	live, _ := os.ReadFile(cfg)
+	if string(live) != current {
+		t.Errorf("config rewritten on a no-op migration")
+	}
+}

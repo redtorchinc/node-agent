@@ -3,7 +3,13 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/redtorchinc/node-agent/internal/config/migrate"
 )
 
 func TestLoad_DefaultsOnly(t *testing.T) {
@@ -92,5 +98,34 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestConfigKeysAreKnownToMigrator pins the contract between the schema and
+// the install-time migrator: every top-level Config key must either appear in
+// the embedded default template or be listed in migrate.OptionalTopKeys —
+// otherwise an operator's setting for it is dropped on the next upgrade (the
+// fate of the services allowlist before v0.3.6).
+func TestConfigKeysAreKnownToMigrator(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(DefaultYAML), &doc); err != nil {
+		t.Fatal(err)
+	}
+	inDefault := map[string]bool{}
+	if len(doc.Content) > 0 {
+		m := doc.Content[0]
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			inDefault[m.Content[i].Value] = true
+		}
+	}
+	rt := reflect.TypeOf(Config{})
+	for i := 0; i < rt.NumField(); i++ {
+		key := strings.Split(rt.Field(i).Tag.Get("yaml"), ",")[0]
+		if key == "" || key == "-" || key == "config_version" {
+			continue
+		}
+		if !inDefault[key] && !migrate.OptionalTopKeys[key] {
+			t.Errorf("config key %q is neither in DefaultYAML nor migrate.OptionalTopKeys — the migrator would drop it", key)
+		}
 	}
 }

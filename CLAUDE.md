@@ -177,6 +177,16 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.6** stops the install-time config migrator from deleting operator
+settings. The embedded default ships `services:`, `rdma:`, `disk:`,
+`training_mode:`, `token:` and `ollama_endpoint:` commented out, so they were
+absent from the parsed default tree and the migrator classified any of them in
+the operator's file as *deprecated* — `rt-node-agent install` / every upgrade
+silently dropped the `/actions/service` allowlist (only `config.yaml.bak` kept
+it). They are now `migrate.OptionalTopKeys`: never reported dropped, carried
+into the merged tree, and an optional key alone is not schema drift (no
+rewrite). `TestConfigKeysAreKnownToMigrator` fails if a future `Config` key is
+neither in the template nor on that list.
 **v0.3.5** extends the sudoers drop-in to `rt-vllm@<model>.service`
 template instances, no wire change. The GB10 fleet serves through one
 `rt-vllm@.service` template plus an `/etc/default/rt-vllm-<model>` env

@@ -86,6 +86,27 @@ func (r Result) AlreadyCurrent() bool { return r.Action == ActionNoChange || r.A
 // import cycle (config imports allocators which we don't need here).
 const CurrentVersion = 2
 
+// OptionalTopKeys are valid top-level config keys that the embedded default
+// ships commented out, so they are absent from the parsed default tree.
+//
+// Without this list the migrator classified them as "deprecated": an operator
+// who set `services:` (the /actions/service allowlist), `rdma:`, `disk:`,
+// `training_mode:` or an inline `token:` lost that setting on the next
+// `rt-node-agent install` or upgrade, silently — the only trace was the key in
+// config.yaml.bak. Keys listed here are never reported as dropped, and when
+// present in the operator's file they are carried into the merged tree.
+//
+// Keep in sync with config.Config: TestConfigKeysAreKnownToMigrator (package
+// config) fails if a schema key is neither in the default template nor here.
+var OptionalTopKeys = map[string]bool{
+	"token":           true,
+	"ollama_endpoint": true,
+	"services":        true,
+	"disk":            true,
+	"training_mode":   true,
+	"rdma":            true,
+}
+
 // ErrBrokenYAML is returned by Migrate when the existing file cannot be
 // parsed as YAML. Callers (typically the install path) should respond by
 // calling ForceReset to back up the broken file and lay down defaults —
@@ -145,8 +166,10 @@ func Migrate(existingPath, defaultYAML string) (Result, error) {
 		}, nil
 	}
 
-	// Graft the operator's top-level values onto the default tree.
+	// Graft the operator's top-level values onto the default tree, then carry
+	// over the optional keys the default only has commented out.
 	preserved := graftValues(&defaultDoc, &existingDoc)
+	preserved = append(preserved, graftOptional(&defaultDoc, &existingDoc)...)
 
 	// Render the merged tree.
 	var merged bytes.Buffer
@@ -334,7 +357,7 @@ func extraTopKeys(existing, def *yaml.Node) []string {
 	}
 	for i := 0; i+1 < len(em.Content); i += 2 {
 		k := em.Content[i].Value
-		if k == "config_version" {
+		if k == "config_version" || OptionalTopKeys[k] {
 			continue
 		}
 		if !have[k] {
@@ -342,6 +365,32 @@ func extraTopKeys(existing, def *yaml.Node) []string {
 		}
 	}
 	return extras
+}
+
+// graftOptional appends to defNode every OptionalTopKeys entry that the
+// operator's file sets and the default tree lacks (the default only has it
+// commented out). Key and value nodes are moved over whole, so the operator's
+// own comments on that block come with them. Returns the keys carried over.
+func graftOptional(defNode, oldDoc *yaml.Node) []string {
+	defMap := topMap(defNode)
+	oldMap := topMap(oldDoc)
+	if defMap == nil || oldMap == nil {
+		return nil
+	}
+	have := map[string]bool{}
+	for i := 0; i+1 < len(defMap.Content); i += 2 {
+		have[defMap.Content[i].Value] = true
+	}
+	var carried []string
+	for i := 0; i+1 < len(oldMap.Content); i += 2 {
+		k := oldMap.Content[i].Value
+		if !OptionalTopKeys[k] || have[k] {
+			continue
+		}
+		defMap.Content = append(defMap.Content, oldMap.Content[i], oldMap.Content[i+1])
+		carried = append(carried, k)
+	}
+	return carried
 }
 
 // graftValues walks every top-level key in defNode that ALSO exists in

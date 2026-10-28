@@ -54,16 +54,23 @@ Start/stop/restart/status of one of N pre-existing systemd units.
    load-bearing — see the note on `systemctlArgv` in
    `internal/services/systemd_linux.go`.
 
-Naming convention: `rt-vllm-<model>.service`. Examples:
+Naming convention: `rt-vllm-<model>.service`, or an instance of an
+`rt-vllm@.service` template, `rt-vllm@<model>.service`. Examples:
 
 ```
 rt-vllm-qwen3.service
 rt-vllm-llama-70b.service
-rt-vllm-deepseek-coder.service
+rt-vllm@gemma4-31b.service      # template instance: one unit, one env file per model
 ```
 
-The pattern accepts alphanumerics + `_` and `-`. Periods are forbidden
+Both patterns accept alphanumerics + `_` and `-`. Periods are forbidden
 inside the variable region to keep the suffix bound to `.service`.
+
+Template instances are covered because a fleet that serves through one
+`rt-vllm@.service` template and an `/etc/default/rt-vllm-<model>` env file
+per model could not otherwise be controlled: the hyphen-only pattern does
+not match `@`, so an allowlisted instance failed at runtime with
+`sudo: a password is required` (v0.3.5).
 
 ### `POST /actions/training-mode`
 

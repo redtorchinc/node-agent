@@ -48,8 +48,9 @@ services:
 ```
 
 - `name` must match a real unit. Pattern is enforced: the sudoers drop-in
-  only permits `rt-vllm-*.service` — operators MUST name their vLLM units
-  accordingly.
+  only permits `rt-vllm-*.service` and instances of the `rt-vllm@.service`
+  template (`rt-vllm@<model>.service`) — operators MUST name their vLLM
+  units accordingly.
 - Empty `actions` means "all" (`start, stop, restart, status`).
 - See [remote-actions.md](remote-actions.md) for the security model.
 

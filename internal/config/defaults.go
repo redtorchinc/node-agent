@@ -74,7 +74,8 @@ platforms:
 # gated. ALLOWLISTED unit names ONLY — agent shells systemctl <action> <unit>
 # for unit in this list. No unit creation, no arbitrary args. The sudoers
 # drop-in installed alongside this agent restricts the unit name pattern to
-# rt-vllm-*.service — operators MUST name their units accordingly.
+# rt-vllm-*.service and rt-vllm@<model>.service template instances —
+# operators MUST name their units accordingly.
 # services:
 #   manager: systemd
 #   allowed:

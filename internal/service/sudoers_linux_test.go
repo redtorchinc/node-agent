@@ -82,9 +82,10 @@ func TestSudoersCoversExactlyTheMutatingVerbs(t *testing.T) {
 		want[verb]++
 	}
 	for verb, n := range want {
-		// One spec per systemctl path (/bin and /usr/bin).
-		if n != 2 {
-			t.Errorf("verb %q appears in %d specs, want 2 (one per systemctl path)", verb, n)
+		// One spec per systemctl path (/bin and /usr/bin) per unit pattern
+		// (rt-vllm-* and rt-vllm@*).
+		if n != 4 {
+			t.Errorf("verb %q appears in %d specs, want 4 (2 systemctl paths x 2 unit patterns)", verb, n)
 		}
 	}
 }
@@ -103,14 +104,38 @@ func TestSudoersSpecsUseAbsoluteSystemctlPaths(t *testing.T) {
 }
 
 func TestSudoersUnitPatternStaysScopedToRtVllm(t *testing.T) {
-	// The hardcoded rt-vllm-* pattern is the safety rail: a misconfigured
-	// config.yaml allowlist must not be able to reach sshd or docker.
-	const pattern = "rt-vllm-[a-zA-Z0-9_-]*.service"
+	// The hardcoded rt-vllm patterns are the safety rail: a misconfigured
+	// config.yaml allowlist must not be able to reach sshd or docker. The
+	// template-instance form covers rt-vllm@<model>.service, which is how
+	// the GB10 fleet serves (one template, one env file per model).
+	allowed := map[string]bool{
+		"rt-vllm-[a-zA-Z0-9_-]*.service": true,
+		"rt-vllm@[a-zA-Z0-9_-]*.service": true,
+	}
 
 	for _, spec := range specLines(t) {
 		fields := strings.Fields(spec)
-		if got := fields[len(fields)-1]; got != pattern {
-			t.Errorf("spec %q targets %q, want %q", spec, got, pattern)
+		if got := fields[len(fields)-1]; !allowed[got] {
+			t.Errorf("spec %q targets %q, want one of the rt-vllm patterns", spec, got)
+		}
+	}
+}
+
+func TestSudoersCoversEveryPathVerbPatternCombination(t *testing.T) {
+	// A missing combination is a unit that allowlists cleanly and then fails
+	// at runtime with `sudo: a password is required` — the failure mode the
+	// template-instance pattern was added to remove.
+	seen := map[string]bool{}
+	for _, spec := range specLines(t) {
+		seen[strings.Join(strings.Fields(spec), " ")] = true
+	}
+	for _, path := range []string{"/bin/systemctl", "/usr/bin/systemctl"} {
+		for _, verb := range []string{"start", "stop", "restart"} {
+			for _, unit := range []string{"rt-vllm-[a-zA-Z0-9_-]*.service", "rt-vllm@[a-zA-Z0-9_-]*.service"} {
+				if want := path + " " + verb + " " + unit; !seen[want] {
+					t.Errorf("drop-in is missing %q", want)
+				}
+			}
 		}
 	}
 }

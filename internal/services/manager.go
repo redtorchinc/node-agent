@@ -10,8 +10,9 @@
 //     unit name cannot inject ; rm -rf style payloads (in practice it can't
 //     get past the allowlist check anyway, but defense in depth).
 //   - The sudoers drop-in installed by `rt-node-agent install` restricts the
-//     pattern to rt-vllm-*.service, so a config-allowlist misconfiguration
-//     still can't escalate to controlling sshd/docker.
+//     pattern to rt-vllm-*.service and rt-vllm@<model>.service template
+//     instances, so a config-allowlist misconfiguration still can't escalate
+//     to controlling sshd/docker.
 package services
 
 import (

@@ -11,6 +11,10 @@ import (
 // cannot use the log as a write amplifier.
 const maxLoggedValue = 256
 
+// lineBreakReplacer neutralises the two line-forging characters before the
+// general control-character pass in logSafe. See the note there.
+var lineBreakReplacer = strings.NewReplacer("\r\n", "�", "\n", "�", "\r", "�")
+
 // logSafe neutralises a caller-supplied string before it reaches slog.
 //
 // Control characters are replaced with U+FFFD and the result is capped at
@@ -41,6 +45,15 @@ func logSafe(s string) string {
 	if s == "" {
 		return ""
 	}
+
+	// Line breaks first, through strings.NewReplacer: CodeQL's go/log-injection
+	// recognises a replacer that removes \n / \r as a sanitizer, but it cannot
+	// see through the rune loop below, so without this the ten call sites in
+	// handlers.go / services_handler.go / training_handler.go stayed flagged
+	// even though every value was already neutralised. Same output as the loop
+	// (U+FFFD), so behaviour is unchanged; the loop still handles every other
+	// control character and invalid UTF-8.
+	s = lineBreakReplacer.Replace(s)
 
 	truncated := false
 	if utf8.RuneCountInString(s) > maxLoggedValue {

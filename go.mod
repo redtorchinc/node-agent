@@ -2,7 +2,7 @@ module github.com/redtorchinc/node-agent
 
 go 1.25.0
 
-toolchain go1.25.14
+toolchain go1.26.10
 
 require (
 	github.com/shirou/gopsutil/v3 v3.24.5

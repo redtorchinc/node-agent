@@ -102,7 +102,17 @@ and x86_64 Ubuntu nodes, cross-user, with closed sockets retained in
 GO-2026-5856. The
 remaining sub-poll-interval capture gap is issue #27 (event-driven
 sources — EndpointSecurity / eBPF — deliberately deferred).
-**Toolchain pins are now unified at go1.25.14** — go.mod `toolchain`
+**Toolchain pins moved to go1.26.10 (2026-10-28).** go1.25 is out of
+support (go.dev lists 1.27.x and 1.26.x only) and govulncheck reported
+eleven stdlib advisories against go1.25.14 fixed only in go1.26.9/1.26.10
+(net/http ×8, net/textproto, crypto/tls, crypto/x509 — GO-2026-6809,
+GO-2026-6617, GO-2026-6613, GO-2026-6612, …). The scan had been silently
+not running: `go install …@latest` for govulncheck and gosec started
+requiring go >= 1.26 and failed under GOTOOLCHAIN=local, so the security
+job went red on the install step from late October. Both tools are now
+version-pinned (govulncheck v1.9.0, gosec v2.30.0) — bump them with
+go-version.
+**Toolchain pins were unified at go1.25.14** — go.mod `toolchain`
 *and* all five workflow `go-version` pins move together. They had
 drifted (go.mod on 1.25.12, workflows on 1.25.11), which is why the
 daily `security` job went red 2026-08-19 → 08-25 on five stdlib

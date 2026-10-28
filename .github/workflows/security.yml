@@ -37,8 +37,12 @@ jobs:
         with:
           go-version: '1.25.14'
           cache: true
+      # Pinned, not @latest: golang.org/x/vuln v1.8.0+ requires go >= 1.26,
+      # and with GOTOOLCHAIN=local against the 1.25.14 toolchain above an
+      # unpinned install broke this job on every run from late October 2026.
+      # Bump together with go-version.
       - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: run govulncheck
         # Plain-text output for the run log, exit non-zero on finding.
         # We deliberately do NOT emit SARIF: govulncheck's SARIF output
@@ -87,8 +91,11 @@ jobs:
       # action pinned to @master — an unpinnable moving ref in a public repo,
       # and no way to set GOOS for the analysis. `go install` mirrors how the
       # govulncheck job above gets its tool.
+      # Pinned for the same reason: gosec v2.30.0 requires go >= 1.26.
+      # v2.29.0 is the version the last green run used. Bump together with
+      # go-version.
       - name: install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
       - name: run gosec
         # -no-fail: findings land in the Security tab for triage rather than

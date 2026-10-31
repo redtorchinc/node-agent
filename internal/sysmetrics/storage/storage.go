@@ -38,6 +38,11 @@ type Info struct {
 	UsedGB  float64 `json:"used_gb,omitempty"`
 	UsedPct float64 `json:"used_pct,omitempty"`
 
+	// Stale is true when statfs on a network mount did not answer within
+	// the deadline (server unreachable or wedged). The capacity fields are
+	// then omitted, never zeroed. Linux network mounts only.
+	Stale bool `json:"stale,omitempty"`
+
 	// ZFS-specific. PoolName is set for pool entries; PoolHealth comes from
 	// /proc/spl/kstat/zfs/<pool>/state when available.
 	PoolName   string `json:"pool_name,omitempty"`

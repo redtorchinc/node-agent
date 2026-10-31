@@ -164,7 +164,7 @@ Response:
 - `memory.pressure_some_avg10` / `_avg60` / `pressure_full_avg10` / `_avg60` — raw PSI gauges. Backend can pick its own threshold instead of inheriting the agent's `"normal"`/`"some"`/`"full"` classification.
 - `top_swap_processes[]` — up to 10 processes ranked by `/proc/<pid>/status:VmSwap`, descending. Useful for "who's the noisy neighbour?" on a thrashing host.
 - `databases[]` — auto-detected DB servers (20 fingerprints incl. Postgres, MySQL, MongoDB, Redis, Neo4j, ChromaDB). Process-based detection, no config.
-- `storage[]` — auto-detected NAS / pooled storage (ZFS, NFS, CIFS, Ceph, GlusterFS, Lustre). Cap from `statfs`; ZFS pool health from `/proc/spl/kstat/zfs`.
+- `storage[]` — auto-detected NAS / pooled storage (ZFS, NFS, CIFS, Ceph, GlusterFS, Lustre). Cap from `statfs`; ZFS pool health from `/proc/spl/kstat/zfs`. On Linux, `statfs` on a network mount is bounded (2 s, at most one call in flight per mountpoint): when the server does not answer, the entry is still listed with `stale: true` and the capacity fields omitted (never zeroed), so an unreachable file server cannot stall `/health`. Additive field; absent when false.
 
 ### Cross-node time alignment (v0.2.x time_sync extension)
 

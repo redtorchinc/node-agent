@@ -2,7 +2,12 @@
 
 package storage
 
-import "testing"
+import (
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+)
 
 func TestNFSVersionFromOpts(t *testing.T) {
 	cases := []struct {
@@ -66,5 +71,90 @@ func TestFstypeToWire(t *testing.T) {
 	}
 	if fstypeToWire("nfs4") != "nfs4" {
 		t.Error("nfs4 should round-trip")
+	}
+}
+
+func withFakeStatfs(t *testing.T, fn func(string, *syscall.Statfs_t) error) {
+	t.Helper()
+	orig := statfsFn
+	statfsFn = fn
+	t.Cleanup(func() { statfsFn = orig })
+}
+
+// A network mount whose server never answers must not stall the probe, and
+// repeated sweeps must not pile up goroutines behind it.
+func TestStatfsBoundedHungMountIsStaleAndSingleFlight(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	var calls atomic.Int32
+	withFakeStatfs(t, func(string, *syscall.Statfs_t) error {
+		calls.Add(1)
+		<-release
+		return nil
+	})
+
+	start := time.Now()
+	if _, stale, err := statfsBounded("/mnt/hung", 50*time.Millisecond); !stale || err != nil {
+		t.Fatalf("first sweep: stale=%v err=%v, want stale", stale, err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("first sweep took %v, want about the 50ms deadline", el)
+	}
+	if _, stale, _ := statfsBounded("/mnt/hung", 50*time.Millisecond); !stale {
+		t.Fatal("second sweep: want stale while the first call is still hung")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("statfs started %d times for one hung mount, want 1", n)
+	}
+}
+
+func TestStatfsBoundedRecoversWhenServerAnswers(t *testing.T) {
+	release := make(chan struct{})
+	withFakeStatfs(t, func(_ string, st *syscall.Statfs_t) error {
+		<-release
+		st.Bsize, st.Blocks, st.Bfree = 4096, 1000, 250
+		return nil
+	})
+	if _, stale, _ := statfsBounded("/mnt/slow", 20*time.Millisecond); !stale {
+		t.Fatal("want stale while the server is hung")
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, stale, err := statfsBounded("/mnt/slow", 200*time.Millisecond); !stale && err == nil && st.Blocks == 1000 {
+			return
+		}
+	}
+	t.Fatal("never returned fresh capacity after the server answered")
+}
+
+func TestBuildNFSEntryStaleOmitsCapacity(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	withFakeStatfs(t, func(string, *syscall.Statfs_t) error { <-release; return nil })
+	orig := statfsTimeout
+	statfsTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { statfsTimeout = orig })
+
+	info := buildNFSEntry(mountEntry{device: "203.0.113.5:/srv/models", mountpoint: "/mnt/models-hung", fstype: "nfs4", opts: "rw,vers=4.2,soft"}, "4.2")
+	if !info.Stale {
+		t.Fatal("want Stale on a hung server")
+	}
+	if info.TotalGB != 0 || info.UsedGB != 0 || info.UsedPct != 0 {
+		t.Fatalf("capacity must be omitted when stale, got %+v", info)
+	}
+	if info.Server != "203.0.113.5" || info.Export != "/srv/models" {
+		t.Fatalf("identity fields still expected, got %+v", info)
+	}
+}
+
+func TestBuildNFSEntryHealthyCapacity(t *testing.T) {
+	withFakeStatfs(t, func(_ string, st *syscall.Statfs_t) error {
+		st.Bsize, st.Blocks, st.Bfree = 1<<20, 2048, 512 // 2 GiB total, 1.5 GiB used
+		return nil
+	})
+	info := buildNFSEntry(mountEntry{device: "203.0.113.5:/srv/models", mountpoint: "/mnt/models-ok", fstype: "nfs4", opts: "rw"}, "4.2")
+	if info.Stale || info.TotalGB != 2 || info.UsedGB != 1.5 || info.UsedPct != 75 {
+		t.Fatalf("got %+v, want 2 GiB / 1.5 GiB / 75%% and not stale", info)
 	}
 }

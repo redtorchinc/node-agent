@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/redtorchinc/node-agent/internal/safecast"
 )
@@ -98,7 +100,7 @@ func buildNFSEntry(m mountEntry, version string) Info {
 		NFSVersion: version,
 		NFSOptions: trimOpts(m.opts),
 	}
-	fillCapacity(&info, m.mountpoint)
+	fillCapacityNet(&info, m.mountpoint)
 	return info
 }
 
@@ -111,7 +113,7 @@ func buildCIFSEntry(m mountEntry) Info {
 		Server:     server,
 		Export:     export,
 	}
-	fillCapacity(&info, m.mountpoint)
+	fillCapacityNet(&info, m.mountpoint)
 	return info
 }
 
@@ -124,7 +126,7 @@ func buildGenericNetEntry(m mountEntry, kind string) Info {
 	if i := strings.Index(m.device, ":"); i > 0 {
 		info.Server = m.device[:i]
 	}
-	fillCapacity(&info, m.mountpoint)
+	fillCapacityNet(&info, m.mountpoint)
 	return info
 }
 
@@ -138,11 +140,84 @@ func buildZFSDatasetEntry(m mountEntry) Info {
 	return info
 }
 
+// fillCapacity is for local filesystems (ZFS datasets): statfs answers from
+// memory, so it runs inline.
 func fillCapacity(info *Info, mountpoint string) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(mountpoint, &st); err != nil {
 		return
 	}
+	applyStatfs(info, &st)
+}
+
+// fillCapacityNet is for network filesystems. A dead NFS/CIFS/Ceph server
+// makes statfs block for timeo*retrans (soft mounts) or forever (hard), and
+// probe() runs inside the /health sweep — so one unreachable file server
+// would stall /health and make a healthy node look down. Bound it: past the
+// deadline the entry is reported with Stale set and capacity omitted.
+func fillCapacityNet(info *Info, mountpoint string) {
+	st, stale, err := statfsBounded(mountpoint, statfsTimeout)
+	if stale {
+		info.Stale = true
+		return
+	}
+	if err != nil {
+		return
+	}
+	applyStatfs(info, &st)
+}
+
+// statfsTimeout bounds statfs on network mounts. Long enough for a healthy
+// but busy server, short enough that /health stays inside its latency budget.
+var statfsTimeout = 2 * time.Second
+
+// statfsFn is the statfs implementation; a variable so tests can substitute
+// one that never returns.
+var statfsFn = syscall.Statfs
+
+type statfsResult struct {
+	st  syscall.Statfs_t
+	err error
+}
+
+var (
+	statfsMu       sync.Mutex
+	statfsInflight = map[string]chan statfsResult{}
+)
+
+// statfsBounded runs statfs off the caller's goroutine and gives up after
+// timeout (stale=true). At most one call per mountpoint is ever in flight:
+// a mount that never answers pins a single goroutine rather than one per
+// sweep, and later sweeps wait on that same call instead of piling up more.
+func statfsBounded(mountpoint string, timeout time.Duration) (syscall.Statfs_t, bool, error) {
+	statfsMu.Lock()
+	ch, running := statfsInflight[mountpoint]
+	if !running {
+		ch = make(chan statfsResult, 1)
+		statfsInflight[mountpoint] = ch
+		fn := statfsFn
+		go func() {
+			var st syscall.Statfs_t
+			err := fn(mountpoint, &st)
+			statfsMu.Lock()
+			delete(statfsInflight, mountpoint)
+			statfsMu.Unlock()
+			ch <- statfsResult{st: st, err: err}
+		}()
+	}
+	statfsMu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.st, false, r.err
+	case <-timer.C:
+		return syscall.Statfs_t{}, true, nil
+	}
+}
+
+func applyStatfs(info *Info, st *syscall.Statfs_t) {
 	total := safecast.U64(int64(st.Bsize)) * st.Blocks
 	free := safecast.U64(int64(st.Bsize)) * st.Bfree
 	used := total - free

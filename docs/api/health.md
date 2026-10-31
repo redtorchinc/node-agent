@@ -229,7 +229,10 @@ Not every host can supply every field. The rules:
   agent lacks permission to enumerate sockets for a PID it doesn't own.
 - **`storage[]`** auto-detects NAS / pooled storage: ZFS pools (via
   `/proc/spl/kstat/zfs`), NFSv3/v4, CIFS/SMB, Ceph, GlusterFS, Lustre.
-  Capacity from `statfs`; NFS version from mount options.
+  Capacity from `statfs`; NFS version from mount options. On Linux,
+  `statfs` on a network mount is bounded (2 s, single-flight per
+  mountpoint): if the server does not answer, the entry is listed with
+  `stale: true` and the capacity fields omitted (v0.3.7+).
 - **Unified-memory hosts (Apple Silicon, NVIDIA GB10 / Grace-Blackwell):**
   `gpus[].vram_unified: true` and `memory.unified: true`. The agent
   back-fills `vram_total_mb` from `memory.total_mb` and `vram_used_mb`

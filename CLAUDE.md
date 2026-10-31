@@ -177,6 +177,16 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.7** bounds `statfs` on network mounts (issue #46). The storage
+collector ran `syscall.Statfs` synchronously on every NFS/CIFS/Ceph/Gluster/
+Lustre mount inside the `/health` sweep, so an unreachable file server stalled
+`/health` for `timeo × retrans` (soft) or forever (hard), and a healthy node
+read as down. Network mounts now go through `statfsBounded`: 2 s deadline, at
+most one call in flight per mountpoint (a never-returning statfs pins one
+goroutine, not one per sweep). On timeout the entry is still listed with the
+new additive field `storage[].stale: true` and capacity omitted, never zeroed.
+Local ZFS datasets keep the inline call; `autofs` entries were already
+skipped, so an untriggered automount is never touched. No config change.
 **v0.3.6** stops the install-time config migrator from deleting operator
 settings. The embedded default ships `services:`, `rdma:`, `disk:`,
 `training_mode:`, `token:` and `ollama_endpoint:` commented out, so they were

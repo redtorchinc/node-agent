@@ -181,6 +181,14 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.9** fixes three discovery misreads seen on the fleet:
+- an Ollama runner (a bundled `llama-server` on a private port) is grouped
+  under `ollama serve`, kind `ollama`, with its loaded models from `/api/ps`;
+- a `docker run … vllm serve …` launcher is no longer a service of its own.
+  Its systemd unit names the container serve it started (matched on served
+  model + port), replacing the container's opaque `docker-<id>.scope`;
+- llama.cpp distribution gets roles: `llama-server --rpc` is the head and
+  `rpc-server` a leaf.
 **v0.3.8** names what holds each GPU and probes more than one vLLM serve per
 host (issue #50). `/health.gpu_services[]` (`platforms.discover`, default
 on; `internal/serving`): each `gpus[].processes` PID is walked up its process

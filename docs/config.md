@@ -30,7 +30,7 @@ canonical example — kept in sync with the embedded default.
 `auto` (default) or `false`. The agent names what holds each GPU from its
 processes: each GPU process is walked up to its service (process tree), the
 service's listening ports and systemd unit are read, and only the service's
-own API port is probed read-only (`/v1/models`, `/api/version`, `/health`).
+own API port is probed read-only (`/v1/models`, Ollama `/api/ps`, `/health`).
 The result is `/health.gpu_services[]`. Any vLLM serve found this way is
 probed by the vLLM detector with no configuration, appearing in
 `platforms.vllm.endpoints[]` with `source: discovered`. Worker, training

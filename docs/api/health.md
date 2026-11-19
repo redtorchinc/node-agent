@@ -98,6 +98,20 @@ fields they already know about.
     }
   ],
 
+  /* v0.3.8: what holds each GPU, discovered from gpus[].processes (platforms.discover).
+     A service is a GPU process tree grouped at its root; see docs/platforms/vllm.md. */
+  "gpu_services": [
+    {"pid": 3188508, "name": "vllm", "cmdline_head": "/opt/vllm/bin/python3 /opt/vllm/bin/vllm serve /models/Base-30B --port 8102 …",
+     "unit": "rt-link-student-shadow.service", "kind": "vllm", "listen_ports": [8102],
+     "endpoint": "http://127.0.0.1:8102", "models": ["base-30b", "student-lora"],
+     "gpu_pids": [3188695], "vram_used_mb": 41616},
+    {"pid": 4163502, "name": "python", "unit": "gliner2-service.service", "kind": "http",
+     "listen_ports": [8077], "endpoint": "http://127.0.0.1:8077", "gpu_pids": [4163502], "vram_used_mb": 2586},
+    /* a Ray leaf: GPU held by Ray workers under raylet; model named by the head's agent */
+    {"pid": 2201, "name": "raylet", "kind": "ray", "role": "leaf", "head": "10.0.0.11",
+     "models": ["big-model-tp2"], "gpu_pids": [2290], "vram_used_mb": 98304}
+  ],
+
   "disk": [
     {"path": "/", "fstype": "ext4", "total_gb": 1800, "used_gb": 412, "used_pct": 22.9},
     {"path": "/var/lib/ollama", "fstype": "ext4", "total_gb": 3600, "used_gb": 2940, "used_pct": 81.7}
@@ -156,6 +170,7 @@ fields they already know about.
           "platform": "vllm",
           "loaded": true,
           "context_window": 32768,
+          "endpoint": "http://localhost:8000",
           "queue": {"running": 2, "waiting": 0},
           "kv_cache": {"gpu_usage_pct": 74.3, "prefix_cache_hit_rate": 0.61,
                        "prefix_cache_hits_total": 56413852, "prefix_cache_queries_total": 92481723},
@@ -164,7 +179,16 @@ fields they already know about.
                          "decode_p50": 6400, "decode_p99": 31000},
           "counters": {"requests_success_total": 18472, "requests_failed_total": 3,
                        "prompt_tokens_total": 92481723, "prompt_tokens_cached_total": 56413852}
-        }
+        },
+        /* v0.3.8: models of platforms.vllm.additional_endpoints serves follow,
+           each with its own "endpoint"; a LoRA module carries "parent" */
+        {"name": "student-lora", "platform": "vllm", "loaded": true,
+         "endpoint": "http://localhost:8102", "parent": "base-30b"}
+      ],
+      /* v0.3.8, only when additional_endpoints is configured; primary first */
+      "endpoints": [
+        {"endpoint": "http://localhost:8000", "up": true},
+        {"endpoint": "http://localhost:8102", "up": true}
       ]
     }
   },

@@ -128,7 +128,17 @@ type TimeSyncConfig struct {
 type PlatformsConfig struct {
 	Ollama PlatformEntry `yaml:"ollama"`
 	VLLM   PlatformEntry `yaml:"vllm"`
+
+	// Discover (v0.3.8, issue #50): "auto" (default) names what holds each
+	// GPU from its processes — process tree, listening ports, a read-only
+	// probe of the service's own API port — and feeds any vLLM serve it finds
+	// to the vLLM detector, so additional_endpoints is only an override.
+	// "false" turns it off.
+	Discover string `yaml:"discover,omitempty"`
 }
+
+// DiscoverEnabled reports whether GPU-service discovery runs.
+func (c Config) DiscoverEnabled() bool { return c.Platforms.Discover != "false" }
 
 // PlatformEntry is one platform's settings.
 //
@@ -139,6 +149,20 @@ type PlatformEntry struct {
 	Endpoint        string `yaml:"endpoint"`
 	MetricsEndpoint string `yaml:"metrics_endpoint"`
 	Required        bool   `yaml:"required"`
+
+	// AdditionalEndpoints is vLLM only (v0.3.8, issue #50): further vLLM
+	// serves on this host, one entry per port — e.g. a LoRA shadow serve
+	// beside the resident model. Each is probed like Endpoint and its models
+	// are merged into platforms.vllm.models[], tagged with their endpoint.
+	// Up / Required / vllm_down keep describing the primary Endpoint only.
+	AdditionalEndpoints []EndpointEntry `yaml:"additional_endpoints,omitempty"`
+}
+
+// EndpointEntry is one platforms.vllm.additional_endpoints[] serve.
+// MetricsEndpoint defaults to {endpoint}/metrics.
+type EndpointEntry struct {
+	Endpoint        string `yaml:"endpoint"`
+	MetricsEndpoint string `yaml:"metrics_endpoint,omitempty"`
 }
 
 // ServicesConfig declares the allowlist of systemd/launchd units the agent
@@ -186,7 +210,10 @@ func Defaults() Config {
 		OllamaEndpoint: "http://localhost:11434",
 		Platforms: PlatformsConfig{
 			Ollama: PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:11434"},
-			VLLM:   PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:8000", MetricsEndpoint: "http://localhost:8000/metrics"},
+			// MetricsEndpoint is left empty on purpose: normalize() derives it
+			// from the final Endpoint. A preset default made a config that
+			// sets only `endpoint` scrape localhost:8000/metrics (#50).
+			VLLM: PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:8000"},
 		},
 		Disk: DiskConfig{Paths: nil},
 		TrainingMode: TrainingModeConfig{
@@ -390,6 +417,9 @@ func normalize(c *Config) {
 	}
 	if c.Platforms.VLLM.Enabled == "" {
 		c.Platforms.VLLM.Enabled = "auto"
+	}
+	if c.Platforms.Discover == "" {
+		c.Platforms.Discover = "auto"
 	}
 	if c.Platforms.VLLM.Endpoint == "" {
 		c.Platforms.VLLM.Endpoint = "http://localhost:8000"

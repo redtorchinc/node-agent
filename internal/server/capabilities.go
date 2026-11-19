@@ -40,7 +40,10 @@ type Capabilities struct {
 	// absent and its absence would otherwise be indistinguishable from "Ray
 	// isn't installed here". Backends must not read a missing ray block as
 	// "not in a cluster" unless this is true.
-	RaySupported                 bool     `json:"ray_supported"`
+	RaySupported bool `json:"ray_supported"`
+	// GPUServicesSupported advertises /health.gpu_services[] and discovery
+	// of vLLM serves from GPU processes (v0.3.8, issue #50).
+	GPUServicesSupported         bool     `json:"gpu_services_supported"`
 	SystemMetricsFieldsSupported []string `json:"system_metrics_fields_supported"`
 }
 
@@ -61,6 +64,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		TimeHandshakeSupported: true,
 		NetworkFlowsSupported:  s.netown != nil,
 		RaySupported:           s.cfg.RayEnabled(),
+		GPUServicesSupported:   s.cfg.DiscoverEnabled(),
 	}
 	// RDMA presence is detected at probe time; the agent advertises support
 	// when the package's runtime check passes. On non-Linux we always

@@ -102,6 +102,10 @@ and x86_64 Ubuntu nodes, cross-user, with closed sockets retained in
 GO-2026-5856. The
 remaining sub-poll-interval capture gap is issue #27 (event-driven
 sources — EndpointSecurity / eBPF — deliberately deferred).
+**Toolchain pins moved to go1.26.11 (2026-11-19)** for GO-2026-6859 (net/http
+HTTP/1 MaxBytesReader header race, fixed only in go1.26.11; reachable from
+`allocators.Scraper.ScrapeOnce`). The daily `security` job had been red on it since
+11-17. Same lockstep rule as below: go.mod `toolchain` + all workflow `go-version` pins.
 **Toolchain pins moved to go1.26.10 (2026-10-28).** go1.25 is out of
 support (go.dev lists 1.27.x and 1.26.x only) and govulncheck reported
 eleven stdlib advisories against go1.25.14 fixed only in go1.26.9/1.26.10
@@ -177,6 +181,50 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.8** names what holds each GPU and probes more than one vLLM serve per
+host (issue #50). `/health.gpu_services[]` (`platforms.discover`, default
+on; `internal/serving`): each `gpus[].processes` PID is walked up its process
+tree, stopping at init, shells, supervisors and container plumbing, to a
+service root:
+1. the process listening on its own `--port`;
+2. else the outermost non-worker process with a listener;
+3. else the innermost non-worker process.
+
+Each root is reported with its systemd unit, listening ports, kind (vllm /
+sglang / ollama / http / torch_distributed / ray / …) and, from a read-only
+probe of its own API port only, endpoint + models. Worker titles
+(`VLLM::*`, `ray::*`) hold NCCL / ZMQ listeners and torchrun holds a
+TCPStore; none of these is ever probed.
+
+A host scan also finds serving API processes that hold no GPU (a Ray head's
+vLLM API). Ray members get `role` head / leaf. A leaf takes the model names
+from its head's agent `/health` (host from `ray.gcs_address`), because vLLM
+keeps no weight files mapped after loading. A `vllm serve --headless` leaf
+gets its model from argv. Discovered vLLM serves feed the vLLM detector
+(`endpoints[].source: discovered`). Capability flag
+`gpu_services_supported`.
+
+The rest of v0.3.8 is the multi-serve vLLM report. A GB10 can
+run a second serve beside its resident model, e.g. a LoRA shadow serve on
+another port. `platforms.vllm` took one `endpoint`, so that serve was invisible
+apart from its runner PIDs and `gpus[].processes` entries. New optional
+`platforms.vllm.additional_endpoints: [{endpoint, metrics_endpoint}]`. Each
+serve is probed like the primary, with its own cache, and its models are
+appended to `platforms.vllm.models[]`. Wire additions:
+- `models[].endpoint` on every vLLM model, so consumers attribute models to a
+  port;
+- `models[].parent` on a LoRA module (from `/v1/models`);
+- `platforms.vllm.endpoints[]` (`{endpoint, up, version, last_error}`, primary
+  first), emitted only when additional endpoints are configured, so a
+  single-serve host's output is unchanged apart from `models[].endpoint`.
+
+`up` / `endpoint` / `vllm_down` / `vllm_required_down` still describe the
+primary only; no new degraded reason. The migrator grafts the `platforms`
+subtree whole, so the key survives upgrades without a schema bump.
+Also fixed: `Defaults()` preset `platforms.vllm.metrics_endpoint` to
+`localhost:8000/metrics`, so a config that set only `endpoint` scraped the
+wrong serve and every model lost its metrics. It is now derived from the
+final endpoint, as documented.
 **v0.3.7** bounds `statfs` on network mounts (issue #46). The storage
 collector ran `syscall.Statfs` synchronously on every NFS/CIFS/Ceph/Gluster/
 Lustre mount inside the `/health` sweep, so an unreachable file server stalled

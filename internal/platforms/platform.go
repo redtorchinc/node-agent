@@ -55,6 +55,22 @@ type Report struct {
 	// success. Trimmed to avoid leaking internal hostnames in nested error
 	// chains.
 	LastError string `json:"last_error,omitempty"`
+
+	// Endpoints lists every probed serve, primary first (v0.3.8, vLLM only,
+	// when additional_endpoints are configured or further serves are
+	// discovered from GPU processes; omitted otherwise, so single-serve hosts
+	// emit what they did before). Up / Endpoint / Version / LastError above
+	// keep describing the primary.
+	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
+}
+
+// EndpointStatus is one probed serve of a multi-endpoint platform.
+type EndpointStatus struct {
+	Endpoint  string `json:"endpoint"`
+	Source    string `json:"source,omitempty"` // config | discovered
+	Up        bool   `json:"up"`
+	Version   string `json:"version,omitempty"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 // Runner is one worker process (e.g. Ollama runner, vLLM worker).
@@ -82,6 +98,12 @@ type Model struct {
 	ProcessorSplit string `json:"processor_split,omitempty"`
 	TTLs           *int64 `json:"ttl_s,omitempty"`
 	VRAMUsedMB     *int64 `json:"vram_used_mb,omitempty"`
+
+	// Endpoint is the serve this model came from (vLLM, v0.3.8). Lets a
+	// consumer attribute models to the right port when one host runs several
+	// serves. Parent is set for a LoRA module: the base model it runs on.
+	Endpoint string `json:"endpoint,omitempty"`
+	Parent   string `json:"parent,omitempty"`
 
 	Queue      *Queue      `json:"queue,omitempty"`
 	KVCache    *KVCache    `json:"kv_cache,omitempty"`

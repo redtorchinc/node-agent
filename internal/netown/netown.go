@@ -571,3 +571,12 @@ func flowID(k key, firstSeenNS int64) string {
 		k.proto, k.laddr, k.lport, k.raddr, k.rport, k.pid, firstSeenNS)))
 	return "sha1:" + hex.EncodeToString(h[:])
 }
+
+// ServiceOf returns the systemd unit and container id that own pid, parsed
+// from its cgroup (Linux; empty strings elsewhere or when unreadable). Used by
+// GPU-service discovery (internal/serving) to name what holds a GPU.
+func ServiceOf(pid int32) (unit, containerID string) {
+	var info ProcInfo
+	fillCgroupInfo(pid, &info)
+	return info.Service, info.ContainerID
+}

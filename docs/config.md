@@ -25,6 +25,19 @@ canonical example — kept in sync with the embedded default.
 | `training_mode` | map | (defaults) | State file + auto-recovery grace. |
 | `rdma` | map | (defaults) | RDMA collection thresholds. |
 
+## `platforms.discover` (v0.3.8)
+
+`auto` (default) or `false`. The agent names what holds each GPU from its
+processes: each GPU process is walked up to its service (process tree), the
+service's listening ports and systemd unit are read, and only the service's
+own API port is probed read-only (`/v1/models`, `/api/version`, `/health`).
+The result is `/health.gpu_services[]`. Any vLLM serve found this way is
+probed by the vLLM detector with no configuration, appearing in
+`platforms.vllm.endpoints[]` with `source: discovered`. Worker, training
+(torchrun / torch.distributed / deepspeed) and Ray listeners are never
+probed. Reading other users' sockets uses the capabilities the systemd unit
+already grants for `/network`. Set `false` to turn it off.
+
 ## `platforms.{ollama,vllm}`
 
 | Key | Type | Default | Notes |
@@ -33,7 +46,7 @@ canonical example — kept in sync with the embedded default.
 | `endpoint` | string | per-platform | Base URL. Ollama: `http://localhost:11434`. vLLM: `http://localhost:8000`. |
 | `metrics_endpoint` | string | `{endpoint}/metrics` | vLLM only. The Prometheus exposition is scraped for per-model queue depth, KV cache, latency histograms, and throughput. Before v0.3.8 it was preset to `localhost:8000/metrics`, so a config that set only `endpoint` scraped the wrong serve. |
 | `required` | bool | false | vLLM only. When true and the probe fails, `vllm_required_down` becomes a hard `degraded_reason`. Otherwise `vllm_down` is soft. |
-| `additional_endpoints` | list | `[]` | vLLM only (v0.3.8). Further vLLM serves on this host, one `{endpoint, metrics_endpoint}` per port (`metrics_endpoint` defaults to `{endpoint}/metrics`). Their models are appended to `platforms.vllm.models[]` with `endpoint` set, and `platforms.vllm.endpoints[]` reports each serve's `up`. **Add an entry whenever you launch another vLLM serve on the host.** `required` / `vllm_down` still cover the primary `endpoint` only. See [platforms/vllm.md](platforms/vllm.md#several-serves-on-one-host-v038). |
+| `additional_endpoints` | list | `[]` | vLLM only (v0.3.8). Further vLLM serves on this host, one `{endpoint, metrics_endpoint}` per port (`metrics_endpoint` defaults to `{endpoint}/metrics`). Their models are appended to `platforms.vllm.models[]` with `endpoint` set, and `platforms.vllm.endpoints[]` reports each serve's `up`. Since `platforms.discover` (on by default) finds running vLLM serves on its own, this is only an override, e.g. for a serve that holds no GPU memory or runs in a container on a bridged network. `required` / `vllm_down` still cover the primary `endpoint` only. See [platforms/vllm.md](platforms/vllm.md#several-serves-on-one-host-v038). |
 
 ## `services`
 

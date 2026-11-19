@@ -56,16 +56,18 @@ type Report struct {
 	// chains.
 	LastError string `json:"last_error,omitempty"`
 
-	// Endpoints lists every probed serve, primary first (v0.3.8, vLLM with
-	// additional_endpoints only; omitted otherwise, so single-serve hosts
-	// emit exactly what they did before). Up / Endpoint / Version /
-	// LastError above keep describing the primary.
+	// Endpoints lists every probed serve, primary first (v0.3.8, vLLM only,
+	// when additional_endpoints are configured or further serves are
+	// discovered from GPU processes; omitted otherwise, so single-serve hosts
+	// emit what they did before). Up / Endpoint / Version / LastError above
+	// keep describing the primary.
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
 }
 
 // EndpointStatus is one probed serve of a multi-endpoint platform.
 type EndpointStatus struct {
 	Endpoint  string `json:"endpoint"`
+	Source    string `json:"source,omitempty"` // config | discovered
 	Up        bool   `json:"up"`
 	Version   string `json:"version,omitempty"`
 	LastError string `json:"last_error,omitempty"`

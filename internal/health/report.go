@@ -31,6 +31,7 @@ import (
 	"github.com/redtorchinc/node-agent/internal/ray"
 	"github.com/redtorchinc/node-agent/internal/rdma"
 	"github.com/redtorchinc/node-agent/internal/safecast"
+	"github.com/redtorchinc/node-agent/internal/serving"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/disk"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/network"
 	"github.com/redtorchinc/node-agent/internal/sysmetrics/storage"
@@ -50,6 +51,12 @@ type Report struct {
 	CPU    CPUInfo   `json:"cpu"`
 	Memory mem.Info  `json:"memory"`
 	GPUs   []gpu.GPU `json:"gpus"`
+
+	// GPUServices (v0.3.8, issue #50) names what holds each GPU: GPU
+	// processes grouped at their service root, with systemd unit, listening
+	// ports, kind and — for a serving API — its endpoint and models. Empty
+	// array when nothing holds a GPU or discovery is off (platforms.discover).
+	GPUServices []serving.Service `json:"gpu_services"`
 
 	// Disk and Network are v0.2.0 additions. Empty arrays when not measurable.
 	Disk     []disk.Info    `json:"disk"`
@@ -199,6 +206,7 @@ type Reporter struct {
 	Thermal    *thermal.Probe
 	TimeServer *timesync.ServerProbe
 	Ray        *ray.Detector
+	Serving    *serving.Discoverer // nil when platforms.discover is "false"
 
 	platforms []platforms.Platform // detectors in stable order
 	services  ServicesReporter
@@ -228,9 +236,14 @@ func NewReporter(cfg config.Config) (*Reporter, error) {
 	if cfg.RayEnabled() {
 		r.Ray = ray.New(rayCfg(cfg))
 	}
+	vd := vllm.New(cfg.Platforms.VLLM)
+	if cfg.DiscoverEnabled() {
+		r.Serving = serving.New()
+		vd.SetDiscovered(r.Serving.VLLMEndpoints)
+	}
 	r.platforms = []platforms.Platform{
 		pollama.New(cfg.Platforms.Ollama),
-		vllm.New(cfg.Platforms.VLLM),
+		vd,
 	}
 	return r, nil
 }
@@ -338,6 +351,15 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	}
 	rep.GPUs = gpus
 
+	rep.GPUServices = []serving.Service{}
+	if r.Serving != nil {
+		sCtx, sCancel := context.WithTimeout(ctx, 3*time.Second)
+		if s := r.Serving.Services(sCtx, gpus); s != nil {
+			rep.GPUServices = s
+		}
+		sCancel()
+	}
+
 	applyUnifiedMemoryDerivation(&rep)
 
 	if r.Thermal != nil {
@@ -405,6 +427,13 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	if r.Ray != nil {
 		rep.Ray = r.Ray.Probe(ctx)
 	}
+	// Ray members: mark the GPU services head / leaf and name the model the
+	// cluster serves (a leaf asks its head's agent). #50.
+	if r.Serving != nil && rep.Ray != nil && rep.Ray.Running {
+		aCtx, aCancel := context.WithTimeout(ctx, 2*time.Second)
+		r.Serving.AnnotateRay(aCtx, rep.GPUServices, rep.Ray.Role, rep.Ray.GCSAddress, r.Cfg.Port)
+		aCancel()
+	}
 
 	rep.Mode = deriveMode(rep, r.mode)
 	if r.mode != nil {
@@ -449,6 +478,14 @@ func (r *Reporter) keepWarmGPU(ctx context.Context) {
 			_ = c.Refresh(wctx)
 		} else {
 			_, _ = r.GPU.Probe(wctx)
+		}
+		// Keep GPU-service discovery warm on the same tick, so /health and
+		// the vLLM detector's discovered serves read a populated cache.
+		if r.Serving != nil {
+			sctx, scancel := context.WithTimeout(context.Background(), 8*time.Second)
+			gpus, _ := r.GPU.Probe(sctx)
+			r.Serving.Services(sctx, gpus)
+			scancel()
 		}
 	}
 	refresh()

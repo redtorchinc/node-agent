@@ -107,3 +107,20 @@ func TestProbe_SingleServeUnchanged(t *testing.T) {
 		t.Errorf("model endpoint = %q", rep.Models[0].Endpoint)
 	}
 }
+
+// TestProbe_DiscoveredServeMerged: a serve found from GPU processes is probed
+// like a configured one, tagged source=discovered, and deduplicated by port
+// against the primary.
+func TestProbe_DiscoveredServeMerged(t *testing.T) {
+	p, s := fakeServe(t, primaryModels), fakeServe(t, shadowModels)
+	d := New(config.PlatformEntry{Enabled: "auto", Endpoint: p.URL})
+	d.SetDiscovered(func() []string { return []string{p.URL, s.URL} }) // primary rediscovered + one new
+	rep := d.Probe(context.Background())
+	if len(rep.Models) != 3 {
+		t.Fatalf("want 3 models, got %d", len(rep.Models))
+	}
+	if len(rep.Endpoints) != 2 || rep.Endpoints[0].Source != "config" ||
+		rep.Endpoints[1].Source != "discovered" || rep.Endpoints[1].Endpoint != s.URL {
+		t.Errorf("endpoints wrong: %+v", rep.Endpoints)
+	}
+}

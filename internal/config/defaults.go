@@ -55,10 +55,15 @@ platforms:
     metrics_endpoint: http://localhost:8000/metrics
     # Set true on nodes that REQUIRE vLLM — then vllm_down becomes hard.
     required: false
-    # Further vLLM serves on this host (v0.3.8), one per port. Add one
-    # whenever you launch another serve here, or the agent cannot see it.
+    # Further vLLM serves on this host (v0.3.8). Running serves are found
+    # from GPU processes (platforms.discover below), so this is only an
+    # override, e.g. for a container on a bridged network.
     # additional_endpoints:
     #   - endpoint: http://localhost:8102
+  # v0.3.8: name what holds each GPU (/health.gpu_services) and probe any
+  # vLLM serve found there. Read-only; only a service's own API port is
+  # probed. "false" turns it off.
+  discover: auto
 
 # Legacy Ollama endpoint (kept for v0.1.x compatibility; new configs should
 # set platforms.ollama.endpoint above). Deprecated; will be removed in a

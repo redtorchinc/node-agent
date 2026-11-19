@@ -28,9 +28,31 @@ just deprioritizing.
 ## Several serves on one host (v0.3.8)
 
 A host can run more than one vLLM serve, e.g. a LoRA shadow serve on its own
-port beside the resident model. List each further serve under
-`additional_endpoints`. **Do it as part of launching the serve**: the agent
-only sees what its config names.
+port beside the resident model. **The agent finds them itself**
+(`platforms.discover`, default on): each GPU process is walked up its process
+tree to the `vllm serve` process, and that process's own listening port is
+probed. A serve found this way shows `source: discovered` in `endpoints[]`.
+`additional_endpoints` remains as an override, for a serve discovery cannot
+see (e.g. a container on a bridged network, whose port lives in another
+network namespace).
+
+Discovery only ever probes the API server's own ports. A `VLLM::Worker`
+holds several listeners (NCCL / ZMQ); those are never touched.
+
+### Multi-node serving
+
+- **Ray leaf:** the GPU is held by Ray workers under `raylet`, with no API and
+  no model on any local command line (vLLM does not keep weight files mapped
+  after loading). `gpu_services[]` lists it as `kind: ray`, `role: leaf`,
+  `head: <head host>`, and the models its head serves. The leaf reads them
+  from the head's agent `/health` (the host from `ray.gcs_address`, same
+  agent port, cached 60 s).
+- **Ray head:** the GPU workers also sit under `raylet`, not under the API
+  process, so serving API processes are found by a host scan as well. The
+  API appears as its own service with `gpu_pids: []`, and its models label
+  the head's `ray` service, which gets `role: head`.
+- **`vllm serve --headless` leaf (no Ray):** `role: leaf`, with the model
+  taken from its command line.
 
 - Each serve is probed like the primary (`/v1/models` + `/metrics`, own 30 s
   cache). Its models are appended to `platforms.vllm.models[]`.
@@ -39,10 +61,10 @@ only sees what its config names.
 - A LoRA module carries `parent`, the base model it is served on. It has no
   queue/latency/counters of its own: vLLM labels its metrics with the base
   model's name, so LoRA traffic is counted on the `parent` entry.
-- `platforms.vllm.endpoints[]` lists every serve, primary first, with `up`,
-  `version` and `last_error`. A dead additional serve shows `up: false` and
-  contributes no models. It is omitted when no additional endpoints are
-  configured.
+- `platforms.vllm.endpoints[]` lists every serve, primary first, with
+  `source` (`config` | `discovered`), `up`, `version` and `last_error`. A dead
+  additional serve shows `up: false` and contributes no models. It is omitted
+  when there is no further serve.
 - `up`, `endpoint`, `vllm_down` and `vllm_required_down` keep describing the
   primary endpoint only. A down additional serve raises no degraded reason;
   read `endpoints[].up`.

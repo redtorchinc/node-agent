@@ -177,7 +177,30 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
-**v0.3.8** probes more than one vLLM serve per host (issue #50). A GB10 can
+**v0.3.8** names what holds each GPU and probes more than one vLLM serve per
+host (issue #50). `/health.gpu_services[]` (`platforms.discover`, default
+on; `internal/serving`): each `gpus[].processes` PID is walked up its process
+tree, stopping at init, shells, supervisors and container plumbing, to a
+service root:
+1. the process listening on its own `--port`;
+2. else the outermost non-worker process with a listener;
+3. else the innermost non-worker process.
+
+Each root is reported with its systemd unit, listening ports, kind (vllm /
+sglang / ollama / http / torch_distributed / ray / …) and, from a read-only
+probe of its own API port only, endpoint + models. Worker titles
+(`VLLM::*`, `ray::*`) hold NCCL / ZMQ listeners and torchrun holds a
+TCPStore; none of these is ever probed.
+
+A host scan also finds serving API processes that hold no GPU (a Ray head's
+vLLM API). Ray members get `role` head / leaf. A leaf takes the model names
+from its head's agent `/health` (host from `ray.gcs_address`), because vLLM
+keeps no weight files mapped after loading. A `vllm serve --headless` leaf
+gets its model from argv. Discovered vLLM serves feed the vLLM detector
+(`endpoints[].source: discovered`). Capability flag
+`gpu_services_supported`.
+
+The rest of v0.3.8 is the multi-serve vLLM report. A GB10 can
 run a second serve beside its resident model, e.g. a LoRA shadow serve on
 another port. `platforms.vllm` took one `endpoint`, so that serve was invisible
 apart from its runner PIDs and `gpus[].processes` entries. New optional

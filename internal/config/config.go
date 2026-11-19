@@ -128,7 +128,17 @@ type TimeSyncConfig struct {
 type PlatformsConfig struct {
 	Ollama PlatformEntry `yaml:"ollama"`
 	VLLM   PlatformEntry `yaml:"vllm"`
+
+	// Discover (v0.3.8, issue #50): "auto" (default) names what holds each
+	// GPU from its processes — process tree, listening ports, a read-only
+	// probe of the service's own API port — and feeds any vLLM serve it finds
+	// to the vLLM detector, so additional_endpoints is only an override.
+	// "false" turns it off.
+	Discover string `yaml:"discover,omitempty"`
 }
+
+// DiscoverEnabled reports whether GPU-service discovery runs.
+func (c Config) DiscoverEnabled() bool { return c.Platforms.Discover != "false" }
 
 // PlatformEntry is one platform's settings.
 //
@@ -407,6 +417,9 @@ func normalize(c *Config) {
 	}
 	if c.Platforms.VLLM.Enabled == "" {
 		c.Platforms.VLLM.Enabled = "auto"
+	}
+	if c.Platforms.Discover == "" {
+		c.Platforms.Discover = "auto"
 	}
 	if c.Platforms.VLLM.Endpoint == "" {
 		c.Platforms.VLLM.Endpoint = "http://localhost:8000"

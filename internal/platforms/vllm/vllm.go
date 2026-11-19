@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,73 @@ type Detector struct {
 	// runners: only the primary scans vLLM processes — the scan is host-wide,
 	// so doing it per serve would list every runner once per endpoint.
 	runners bool
+
+	// discovered returns base URLs of vLLM serves found from GPU processes
+	// (v0.3.8, internal/serving); nil when discovery is off. Each is probed
+	// through its own cached detector, kept while it stays discovered.
+	discovered func() []string
+	dmu        sync.Mutex
+	dprobes    map[string]*Detector
+}
+
+// SetDiscovered wires the discovery source for further vLLM serves.
+func (d *Detector) SetDiscovered(f func() []string) { d.discovered = f }
+
+type extraProbe struct {
+	det    *Detector
+	source string
+}
+
+// extras returns the further serves to probe: configured
+// additional_endpoints first, then discovered ones, deduplicated by port
+// against the primary and each other (every serve is local to this host).
+func (d *Detector) extras() []extraProbe {
+	seen := map[string]bool{portOf(d.cfg.Endpoint): true}
+	var out []extraProbe
+	for _, x := range d.extra {
+		if p := portOf(x.cfg.Endpoint); !seen[p] {
+			seen[p] = true
+			out = append(out, extraProbe{x, "config"})
+		}
+	}
+	if d.discovered == nil {
+		return out
+	}
+	urls := d.discovered()
+	d.dmu.Lock()
+	defer d.dmu.Unlock()
+	if d.dprobes == nil {
+		d.dprobes = map[string]*Detector{}
+	}
+	live := map[string]bool{}
+	for _, u := range urls {
+		p := portOf(u)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		live[u] = true
+		x := d.dprobes[u]
+		if x == nil {
+			x = newDetector(config.PlatformEntry{Enabled: d.cfg.Enabled, Endpoint: u})
+			d.dprobes[u] = x
+		}
+		out = append(out, extraProbe{x, "discovered"})
+	}
+	for u := range d.dprobes {
+		if !live[u] {
+			delete(d.dprobes, u)
+		}
+	}
+	return out
+}
+
+func portOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Port()
 }
 
 // New returns a detector for the given platform entry.
@@ -86,7 +154,13 @@ func (d *Detector) Name() string { return "vllm" }
 // readers always hit a populated cache, not a cold cache primed by
 // their own request.
 func (d *Detector) Refresh(ctx context.Context) {
-	for _, x := range append([]*Detector{d}, d.extra...) {
+	all := append([]*Detector{d}, d.extra...)
+	d.dmu.Lock()
+	for _, x := range d.dprobes {
+		all = append(all, x)
+	}
+	d.dmu.Unlock()
+	for _, x := range all {
 		x.mu.Lock()
 		x.cached = nil
 		x.cachedAt = time.Time{}
@@ -104,22 +178,26 @@ func (d *Detector) Refresh(ctx context.Context) {
 // vllm_down and vllm_required_down keep their meaning.
 func (d *Detector) Probe(ctx context.Context) platforms.Report {
 	rep := d.probeOne(ctx)
-	if len(d.extra) == 0 || d.cfg.Enabled == "false" {
+	if d.cfg.Enabled == "false" {
+		return rep
+	}
+	extras := d.extras()
+	if len(extras) == 0 {
 		return rep
 	}
 	// Copy: rep.Models shares its backing array with the cached report.
 	rep.Models = append([]platforms.Model{}, rep.Models...)
-	rep.Endpoints = []platforms.EndpointStatus{endpointStatus(rep)}
-	for _, x := range d.extra {
-		xr := x.probeOne(ctx)
+	rep.Endpoints = []platforms.EndpointStatus{endpointStatus(rep, "config")}
+	for _, x := range extras {
+		xr := x.det.probeOne(ctx)
 		rep.Models = append(rep.Models, xr.Models...)
-		rep.Endpoints = append(rep.Endpoints, endpointStatus(xr))
+		rep.Endpoints = append(rep.Endpoints, endpointStatus(xr, x.source))
 	}
 	return rep
 }
 
-func endpointStatus(r platforms.Report) platforms.EndpointStatus {
-	return platforms.EndpointStatus{Endpoint: r.Endpoint, Up: r.Up, Version: r.Version, LastError: r.LastError}
+func endpointStatus(r platforms.Report, source string) platforms.EndpointStatus {
+	return platforms.EndpointStatus{Endpoint: r.Endpoint, Source: source, Up: r.Up, Version: r.Version, LastError: r.LastError}
 }
 
 // probeOne probes this detector's single endpoint, through its cache.

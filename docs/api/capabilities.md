@@ -20,6 +20,7 @@ rely on without parsing semver.
   "metrics_enabled": true,
   "time_handshake_supported": true,
   "network_flows_supported": true,
+  "gpu_services_supported": true,
   "system_metrics_fields_supported": [
     "cpu.usage_pct", "cpu.usage_per_core_pct", "cpu.load_1m",
     "memory.unified", "memory.pressure", "memory.huge_pages_total",
@@ -46,6 +47,9 @@ rely on without parsing semver.
   pre-v0.3.0 agents) means the routes 404 — the gateway must not attempt
   flow resolution against this node. See
   [network-flows.md](network-flows.md).
+- `gpu_services_supported` is `true` from v0.3.8 on unless
+  `platforms.discover: "false"`: `/health.gpu_services[]` is populated and
+  vLLM serves found from GPU processes are probed without configuration.
 - `services_allowlist` lists exactly what `POST /actions/service` will
   accept. Anything outside this list returns 403.
 - `system_metrics_fields_supported` is the canonical list of `/health`

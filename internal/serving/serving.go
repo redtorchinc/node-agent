@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"path"
@@ -274,7 +275,8 @@ func (x *Discoverer) Services(ctx context.Context, gpus []gpu.GPU) []Service {
 	procs := map[int32]int64{}
 	for _, g := range gpus {
 		for _, p := range g.Processes {
-			if p.PID > 0 {
+			// Bounded: a PID outside int32 is not a real process id.
+			if p.PID > 0 && p.PID <= math.MaxInt32 {
 				procs[int32(p.PID)] += p.VRAMUsedMB
 			}
 		}

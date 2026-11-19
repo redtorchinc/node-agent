@@ -102,6 +102,10 @@ and x86_64 Ubuntu nodes, cross-user, with closed sockets retained in
 GO-2026-5856. The
 remaining sub-poll-interval capture gap is issue #27 (event-driven
 sources — EndpointSecurity / eBPF — deliberately deferred).
+**Toolchain pins moved to go1.26.11 (2026-11-19)** for GO-2026-6859 (net/http
+HTTP/1 MaxBytesReader header race, fixed only in go1.26.11; reachable from
+`allocators.Scraper.ScrapeOnce`). The daily `security` job had been red on it since
+11-17. Same lockstep rule as below: go.mod `toolchain` + all workflow `go-version` pins.
 **Toolchain pins moved to go1.26.10 (2026-10-28).** go1.25 is out of
 support (go.dev lists 1.27.x and 1.26.x only) and govulncheck reported
 eleven stdlib advisories against go1.25.14 fixed only in go1.26.9/1.26.10

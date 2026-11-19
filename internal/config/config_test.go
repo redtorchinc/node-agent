@@ -158,3 +158,33 @@ platforms:
 		t.Errorf("primary endpoint = %q", c.Platforms.VLLM.Endpoint)
 	}
 }
+
+// TestLoad_VLLMMetricsEndpointFollowsEndpoint: setting only `endpoint` must
+// scrape {endpoint}/metrics, as documented — not the localhost:8000 default.
+func TestLoad_VLLMMetricsEndpointFollowsEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	must(t, os.WriteFile(path, []byte(`
+platforms:
+  vllm:
+    endpoint: http://localhost:8100
+`), 0o644))
+	t.Setenv("RT_AGENT_CONFIG", path)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.Platforms.VLLM.MetricsEndpoint; got != "http://localhost:8100/metrics" {
+		t.Errorf("metrics_endpoint = %q, want http://localhost:8100/metrics", got)
+	}
+
+	t.Setenv("RT_AGENT_CONFIG", filepath.Join(dir, "absent.yaml"))
+	t.Setenv("RT_AGENT_VLLM", "http://localhost:8200")
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.Platforms.VLLM.MetricsEndpoint; got != "http://localhost:8200/metrics" {
+		t.Errorf("env endpoint: metrics_endpoint = %q", got)
+	}
+}

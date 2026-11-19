@@ -194,6 +194,10 @@ appended to `platforms.vllm.models[]`. Wire additions:
 `up` / `endpoint` / `vllm_down` / `vllm_required_down` still describe the
 primary only; no new degraded reason. The migrator grafts the `platforms`
 subtree whole, so the key survives upgrades without a schema bump.
+Also fixed: `Defaults()` preset `platforms.vllm.metrics_endpoint` to
+`localhost:8000/metrics`, so a config that set only `endpoint` scraped the
+wrong serve and every model lost its metrics. It is now derived from the
+final endpoint, as documented.
 **v0.3.7** bounds `statfs` on network mounts (issue #46). The storage
 collector ran `syscall.Statfs` synchronously on every NFS/CIFS/Ceph/Gluster/
 Lustre mount inside the `/health` sweep, so an unreachable file server stalled

@@ -36,7 +36,9 @@ only sees what its config names.
   cache). Its models are appended to `platforms.vllm.models[]`.
 - Every vLLM model carries `endpoint`, the serve it came from, so a consumer
   can attribute models, queues and counters to the right port.
-- A LoRA module carries `parent`, the base model it is served on.
+- A LoRA module carries `parent`, the base model it is served on. It has no
+  queue/latency/counters of its own: vLLM labels its metrics with the base
+  model's name, so LoRA traffic is counted on the `parent` entry.
 - `platforms.vllm.endpoints[]` lists every serve, primary first, with `up`,
   `version` and `last_error`. A dead additional serve shows `up: false` and
   contributes no models. It is omitted when no additional endpoints are

@@ -200,7 +200,10 @@ func Defaults() Config {
 		OllamaEndpoint: "http://localhost:11434",
 		Platforms: PlatformsConfig{
 			Ollama: PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:11434"},
-			VLLM:   PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:8000", MetricsEndpoint: "http://localhost:8000/metrics"},
+			// MetricsEndpoint is left empty on purpose: normalize() derives it
+			// from the final Endpoint. A preset default made a config that
+			// sets only `endpoint` scrape localhost:8000/metrics (#50).
+			VLLM: PlatformEntry{Enabled: "auto", Endpoint: "http://localhost:8000"},
 		},
 		Disk: DiskConfig{Paths: nil},
 		TrainingMode: TrainingModeConfig{

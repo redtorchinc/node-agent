@@ -139,6 +139,20 @@ type PlatformEntry struct {
 	Endpoint        string `yaml:"endpoint"`
 	MetricsEndpoint string `yaml:"metrics_endpoint"`
 	Required        bool   `yaml:"required"`
+
+	// AdditionalEndpoints is vLLM only (v0.3.8, issue #50): further vLLM
+	// serves on this host, one entry per port — e.g. a LoRA shadow serve
+	// beside the resident model. Each is probed like Endpoint and its models
+	// are merged into platforms.vllm.models[], tagged with their endpoint.
+	// Up / Required / vllm_down keep describing the primary Endpoint only.
+	AdditionalEndpoints []EndpointEntry `yaml:"additional_endpoints,omitempty"`
+}
+
+// EndpointEntry is one platforms.vllm.additional_endpoints[] serve.
+// MetricsEndpoint defaults to {endpoint}/metrics.
+type EndpointEntry struct {
+	Endpoint        string `yaml:"endpoint"`
+	MetricsEndpoint string `yaml:"metrics_endpoint,omitempty"`
 }
 
 // ServicesConfig declares the allowlist of systemd/launchd units the agent

@@ -16,12 +16,36 @@ platforms:
     endpoint: http://localhost:8000
     metrics_endpoint: http://localhost:8000/metrics
     required: false             # true ⇒ vllm_down becomes hard
+    additional_endpoints:       # v0.3.8 — further serves on this host
+      - endpoint: http://localhost:8102
 ```
 
 Setting `required: true` flips `vllm_down` from soft to hard
 (`vllm_required_down`). Use this on nodes that exist to serve vLLM —
 the dispatcher will then skip them when vLLM is unreachable, rather than
 just deprioritizing.
+
+## Several serves on one host (v0.3.8)
+
+A host can run more than one vLLM serve, e.g. a LoRA shadow serve on its own
+port beside the resident model. List each further serve under
+`additional_endpoints`. **Do it as part of launching the serve**: the agent
+only sees what its config names.
+
+- Each serve is probed like the primary (`/v1/models` + `/metrics`, own 30 s
+  cache). Its models are appended to `platforms.vllm.models[]`.
+- Every vLLM model carries `endpoint`, the serve it came from, so a consumer
+  can attribute models, queues and counters to the right port.
+- A LoRA module carries `parent`, the base model it is served on.
+- `platforms.vllm.endpoints[]` lists every serve, primary first, with `up`,
+  `version` and `last_error`. A dead additional serve shows `up: false` and
+  contributes no models. It is omitted when no additional endpoints are
+  configured.
+- `up`, `endpoint`, `vllm_down` and `vllm_required_down` keep describing the
+  primary endpoint only. A down additional serve raises no degraded reason;
+  read `endpoints[].up`.
+- `runners[]` stays a host-wide scan of vLLM processes. It already listed every
+  serve's processes.
 
 ## Histogram → percentile
 

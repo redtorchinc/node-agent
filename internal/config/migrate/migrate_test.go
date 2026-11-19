@@ -411,3 +411,35 @@ func TestMigrate_OptionalKeyAloneIsNoOp(t *testing.T) {
 		t.Errorf("config rewritten on a no-op migration")
 	}
 }
+
+// TestMigrate_VLLMAdditionalEndpointsSurvive pins that a second vLLM serve
+// declared under platforms.vllm.additional_endpoints (v0.3.8, #50) is kept
+// when an upgrade merges the config: the platforms subtree is grafted whole.
+func TestMigrate_VLLMAdditionalEndpointsSurvive(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	existing := `port: 11435
+platforms:
+  vllm:
+    enabled: auto
+    endpoint: http://localhost:8100
+    additional_endpoints:
+      - endpoint: http://localhost:8102
+`
+	if err := os.WriteFile(cfg, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Migrate(cfg, v2Default)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if res.Action != ActionMerged {
+		t.Fatalf("Action = %q, want %q", res.Action, ActionMerged)
+	}
+	live, _ := os.ReadFile(cfg)
+	for _, want := range []string{"additional_endpoints:", "http://localhost:8102", "http://localhost:8100"} {
+		if !strings.Contains(string(live), want) {
+			t.Errorf("merged config lost %q:\n%s", want, live)
+		}
+	}
+}

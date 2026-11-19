@@ -33,6 +33,7 @@ canonical example — kept in sync with the embedded default.
 | `endpoint` | string | per-platform | Base URL. Ollama: `http://localhost:11434`. vLLM: `http://localhost:8000`. |
 | `metrics_endpoint` | string | `{endpoint}/metrics` | vLLM only. The Prometheus exposition is scraped for per-model queue depth, KV cache, latency histograms, and throughput. |
 | `required` | bool | false | vLLM only. When true and the probe fails, `vllm_required_down` becomes a hard `degraded_reason`. Otherwise `vllm_down` is soft. |
+| `additional_endpoints` | list | `[]` | vLLM only (v0.3.8). Further vLLM serves on this host, one `{endpoint, metrics_endpoint}` per port (`metrics_endpoint` defaults to `{endpoint}/metrics`). Their models are appended to `platforms.vllm.models[]` with `endpoint` set, and `platforms.vllm.endpoints[]` reports each serve's `up`. **Add an entry whenever you launch another vLLM serve on the host.** `required` / `vllm_down` still cover the primary `endpoint` only. See [platforms/vllm.md](platforms/vllm.md#several-serves-on-one-host-v038). |
 
 ## `services`
 

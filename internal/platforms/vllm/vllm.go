@@ -39,10 +39,33 @@ type Detector struct {
 	cachedAt time.Time
 	cacheTTL time.Duration
 	lastProm *promSnapshot // for rate computation (one previous scrape)
+
+	// extra probes platforms.vllm.additional_endpoints (v0.3.8, #50): one
+	// detector per further serve on this host, each with its own cache.
+	extra []*Detector
+	// runners: only the primary scans vLLM processes — the scan is host-wide,
+	// so doing it per serve would list every runner once per endpoint.
+	runners bool
 }
 
 // New returns a detector for the given platform entry.
 func New(entry config.PlatformEntry) *Detector {
+	d := newDetector(entry)
+	d.runners = true
+	for _, e := range entry.AdditionalEndpoints {
+		if strings.TrimSpace(e.Endpoint) == "" {
+			continue
+		}
+		d.extra = append(d.extra, newDetector(config.PlatformEntry{
+			Enabled:         entry.Enabled,
+			Endpoint:        e.Endpoint,
+			MetricsEndpoint: e.MetricsEndpoint,
+		}))
+	}
+	return d
+}
+
+func newDetector(entry config.PlatformEntry) *Detector {
 	return &Detector{
 		cfg:  entry,
 		http: &http.Client{Timeout: 2 * time.Second},
@@ -63,16 +86,44 @@ func (d *Detector) Name() string { return "vllm" }
 // readers always hit a populated cache, not a cold cache primed by
 // their own request.
 func (d *Detector) Refresh(ctx context.Context) {
-	d.mu.Lock()
-	d.cached = nil
-	d.cachedAt = time.Time{}
-	d.mu.Unlock()
+	for _, x := range append([]*Detector{d}, d.extra...) {
+		x.mu.Lock()
+		x.cached = nil
+		x.cachedAt = time.Time{}
+		x.mu.Unlock()
+	}
 	_ = d.Probe(ctx)
 }
 
 // Probe assembles a platforms.Report. Returns Up=false on any unreachable
 // endpoint. When `enabled: false` short-circuits without a network call.
+//
+// With additional_endpoints, each further serve is probed the same way and
+// its models are appended to Models; Endpoints lists every serve, primary
+// first. Up / Endpoint / Version / LastError stay the primary's, so
+// vllm_down and vllm_required_down keep their meaning.
 func (d *Detector) Probe(ctx context.Context) platforms.Report {
+	rep := d.probeOne(ctx)
+	if len(d.extra) == 0 || d.cfg.Enabled == "false" {
+		return rep
+	}
+	// Copy: rep.Models shares its backing array with the cached report.
+	rep.Models = append([]platforms.Model{}, rep.Models...)
+	rep.Endpoints = []platforms.EndpointStatus{endpointStatus(rep)}
+	for _, x := range d.extra {
+		xr := x.probeOne(ctx)
+		rep.Models = append(rep.Models, xr.Models...)
+		rep.Endpoints = append(rep.Endpoints, endpointStatus(xr))
+	}
+	return rep
+}
+
+func endpointStatus(r platforms.Report) platforms.EndpointStatus {
+	return platforms.EndpointStatus{Endpoint: r.Endpoint, Up: r.Up, Version: r.Version, LastError: r.LastError}
+}
+
+// probeOne probes this detector's single endpoint, through its cache.
+func (d *Detector) probeOne(ctx context.Context) platforms.Report {
 	intervalS := int64(d.cacheTTL / time.Second)
 	if d.cfg.Enabled == "false" {
 		return platforms.Report{
@@ -121,9 +172,12 @@ func (d *Detector) Probe(ctx context.Context) platforms.Report {
 	// available.
 	for _, m := range models {
 		md := buildModel(m, prom, rep.LastScrapeTS, d.lastProm, time.Duration(d.cacheTTL))
+		md.Endpoint = d.cfg.Endpoint
 		rep.Models = append(rep.Models, md)
 	}
-	rep.Runners = probeVLLMRunners()
+	if d.runners {
+		rep.Runners = probeVLLMRunners()
+	}
 
 	// Cache for next call.
 	d.mu.Lock()
@@ -148,6 +202,8 @@ type modelsResp struct {
 		// vLLM-specific extras (best-effort; field names vary across versions).
 		MaxModelLen int    `json:"max_model_len"`
 		Quant       string `json:"quantization"`
+		// Parent is set on a LoRA module: the base model id it is served on.
+		Parent string `json:"parent"`
 	} `json:"data"`
 }
 
@@ -176,6 +232,7 @@ func (d *Detector) fetchModels(ctx context.Context) ([]vllmModel, string, error)
 			ID:           m.ID,
 			MaxModelLen:  m.MaxModelLen,
 			Quantization: m.Quant,
+			Parent:       m.Parent,
 		})
 	}
 	return out, version, nil
@@ -185,6 +242,7 @@ type vllmModel struct {
 	ID           string
 	MaxModelLen  int
 	Quantization string
+	Parent       string
 }
 
 func (d *Detector) fetchMetrics(ctx context.Context) (string, error) {
@@ -217,6 +275,7 @@ func buildModel(m vllmModel, prom *promSnapshot, ts int64, prev *promSnapshot, i
 		Platform:     "vllm",
 		Loaded:       true,
 		Quantization: m.Quantization,
+		Parent:       m.Parent,
 		LastScrapeTS: ts,
 	}
 	if m.MaxModelLen > 0 {

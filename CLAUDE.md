@@ -177,6 +177,23 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.8** probes more than one vLLM serve per host (issue #50). A GB10 can
+run a second serve beside its resident model, e.g. a LoRA shadow serve on
+another port. `platforms.vllm` took one `endpoint`, so that serve was invisible
+apart from its runner PIDs and `gpus[].processes` entries. New optional
+`platforms.vllm.additional_endpoints: [{endpoint, metrics_endpoint}]`. Each
+serve is probed like the primary, with its own cache, and its models are
+appended to `platforms.vllm.models[]`. Wire additions:
+- `models[].endpoint` on every vLLM model, so consumers attribute models to a
+  port;
+- `models[].parent` on a LoRA module (from `/v1/models`);
+- `platforms.vllm.endpoints[]` (`{endpoint, up, version, last_error}`, primary
+  first), emitted only when additional endpoints are configured, so a
+  single-serve host's output is unchanged apart from `models[].endpoint`.
+
+`up` / `endpoint` / `vllm_down` / `vllm_required_down` still describe the
+primary only; no new degraded reason. The migrator grafts the `platforms`
+subtree whole, so the key survives upgrades without a schema bump.
 **v0.3.7** bounds `statfs` on network mounts (issue #46). The storage
 collector ran `syscall.Statfs` synchronously on every NFS/CIFS/Ceph/Gluster/
 Lustre mount inside the `/health` sweep, so an unreachable file server stalled

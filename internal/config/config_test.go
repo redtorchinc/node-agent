@@ -129,3 +129,32 @@ func TestConfigKeysAreKnownToMigrator(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_VLLMAdditionalEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	must(t, os.WriteFile(path, []byte(`
+platforms:
+  vllm:
+    enabled: auto
+    endpoint: http://localhost:8100
+    additional_endpoints:
+      - endpoint: http://localhost:8102
+      - endpoint: http://localhost:8104
+        metrics_endpoint: http://localhost:9104/metrics
+`), 0o644))
+
+	t.Setenv("RT_AGENT_CONFIG", path)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	extra := c.Platforms.VLLM.AdditionalEndpoints
+	if len(extra) != 2 || extra[0].Endpoint != "http://localhost:8102" ||
+		extra[1].MetricsEndpoint != "http://localhost:9104/metrics" {
+		t.Errorf("bad parse: %+v", extra)
+	}
+	if c.Platforms.VLLM.Endpoint != "http://localhost:8100" {
+		t.Errorf("primary endpoint = %q", c.Platforms.VLLM.Endpoint)
+	}
+}

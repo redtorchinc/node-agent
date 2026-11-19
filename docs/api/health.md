@@ -156,6 +156,7 @@ fields they already know about.
           "platform": "vllm",
           "loaded": true,
           "context_window": 32768,
+          "endpoint": "http://localhost:8000",
           "queue": {"running": 2, "waiting": 0},
           "kv_cache": {"gpu_usage_pct": 74.3, "prefix_cache_hit_rate": 0.61,
                        "prefix_cache_hits_total": 56413852, "prefix_cache_queries_total": 92481723},
@@ -164,7 +165,16 @@ fields they already know about.
                          "decode_p50": 6400, "decode_p99": 31000},
           "counters": {"requests_success_total": 18472, "requests_failed_total": 3,
                        "prompt_tokens_total": 92481723, "prompt_tokens_cached_total": 56413852}
-        }
+        },
+        /* v0.3.8: models of platforms.vllm.additional_endpoints serves follow,
+           each with its own "endpoint"; a LoRA module carries "parent" */
+        {"name": "student-lora", "platform": "vllm", "loaded": true,
+         "endpoint": "http://localhost:8102", "parent": "base-30b"}
+      ],
+      /* v0.3.8, only when additional_endpoints is configured; primary first */
+      "endpoints": [
+        {"endpoint": "http://localhost:8000", "up": true},
+        {"endpoint": "http://localhost:8102", "up": true}
       ]
     }
   },

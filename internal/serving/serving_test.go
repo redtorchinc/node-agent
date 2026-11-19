@@ -301,3 +301,99 @@ func TestCmdlineModel(t *testing.T) {
 		}
 	}
 }
+
+// Ollama's runner (a bundled llama-server on a private port) belongs to
+// `ollama serve`; the service is kind ollama with the loaded models from /api/ps.
+func TestOllamaRunnerGroupsUnderServe(t *testing.T) {
+	api, _ := server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/ps" {
+			_, _ = w.Write([]byte(`{"models":[{"name":"nomic-embed-text-v2-moe:latest"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	runnerPort, runnerHits := server(t, func(w http.ResponseWriter, r *http.Request) {})
+	d := fakeDeps{
+		procs: map[int32]Proc{
+			12: {PPID: 11, Name: "llama-server", Cmdline: []string{"/usr/local/lib/ollama/llama-server", "--model", "/blobs/sha256-ab", "--port", strconv.Itoa(int(runnerPort))}},
+			11: {PPID: 1, Name: "ollama", Cmdline: []string{"/usr/local/bin/ollama", "serve"}},
+		},
+		listeners: map[int32][]Listener{
+			12: {{Addr: "127.0.0.1", Port: runnerPort}},
+			11: {{Addr: "0.0.0.0", Port: api}},
+		},
+		units:   map[int32]string{11: "ollama.service"},
+		serving: []int32{12},
+	}
+	svcs := NewWithDeps(d).Services(context.Background(), gpus(gpu.Process{PID: 12, VRAMUsedMB: 776}))
+	if len(svcs) != 1 {
+		t.Fatalf("want 1 service, got %+v", svcs)
+	}
+	s := svcs[0]
+	if s.PID != 11 || s.Kind != "ollama" || s.Unit != "ollama.service" || s.VRAMUsedMB != 776 {
+		t.Errorf("ollama service wrong: %+v", s)
+	}
+	if len(s.Models) != 1 || s.Models[0] != "nomic-embed-text-v2-moe:latest" {
+		t.Errorf("models = %v, want the loaded model from /api/ps", s.Models)
+	}
+	if atomic.LoadInt64(runnerHits) != 0 {
+		t.Errorf("runner's private port was probed %d times", *runnerHits)
+	}
+}
+
+// `docker run … vllm serve …` under a systemd unit is not a service of its
+// own; its unit names the container serve it started.
+func TestContainerServeTakesLauncherUnit(t *testing.T) {
+	api, _ := server(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"served-name","owned_by":"vllm"}]}`))
+	})
+	ctr := "33e118c446f6542df12fbef473a3c1d0c33e118c446f6542df12fbef473a3c1"
+	d := fakeDeps{
+		procs: map[int32]Proc{
+			31: {PPID: 30, Name: "VLLM::Worker", Cmdline: []string{"VLLM::Worker"}},
+			30: {PPID: 29, Name: "vllm", Cmdline: []string{"vllm", "serve", "/model", "--served-model-name", "served-name", "--port", strconv.Itoa(int(api))}},
+			29: {PPID: 1, Name: "containerd-shim-runc-v2", Cmdline: []string{"containerd-shim-runc-v2"}},
+			20: {PPID: 1, Name: "docker", Cmdline: []string{"docker", "run", "--rm", "--name", "rt-vllm-x", "img", "vllm", "serve", "/model", "--served-model-name", "served-name", "--port", strconv.Itoa(int(api))}},
+		},
+		listeners: map[int32][]Listener{30: {{Addr: "0.0.0.0", Port: api}}},
+		units:     map[int32]string{30: "docker-" + ctr + ".scope", 20: "rt-vllm@x.service"},
+		serving:   []int32{20, 30},
+	}
+	// fakeDeps.Unit returns no container id; set it via a wrapper.
+	svcs := NewWithDeps(ctrDeps{d, map[int32]string{30: ctr}}).Services(context.Background(), gpus(gpu.Process{PID: 31, VRAMUsedMB: 90000}))
+	if len(svcs) != 1 {
+		t.Fatalf("launcher must not be its own service: %+v", svcs)
+	}
+	if s := svcs[0]; s.PID != 30 || s.Unit != "rt-vllm@x.service" || s.ContainerID != ctr {
+		t.Errorf("container serve wrong: %+v", s)
+	}
+}
+
+type ctrDeps struct {
+	fakeDeps
+	ctr map[int32]string
+}
+
+func (c ctrDeps) Unit(pid int32) (string, string) { return c.units[pid], c.ctr[pid] }
+
+// llama.cpp distributed: llama-server --rpc is the head, rpc-server a leaf.
+func TestLlamaCppRPCRoles(t *testing.T) {
+	d := fakeDeps{
+		procs: map[int32]Proc{
+			41: {PPID: 1, Name: "rpc-server", Cmdline: []string{"/opt/llama/rpc-server", "-H", "0.0.0.0", "-p", "50052"}},
+			42: {PPID: 1, Name: "llama-server", Cmdline: []string{"/opt/llama/llama-server", "-m", "/m/x.gguf", "--rpc", "10.0.0.2:50052"}},
+		},
+		serving: []int32{42},
+	}
+	svcs := NewWithDeps(d).Services(context.Background(), gpus(gpu.Process{PID: 41, VRAMUsedMB: 70000}))
+	roles := map[int32]string{}
+	for _, s := range svcs {
+		if s.Kind != "llama.cpp" {
+			t.Errorf("kind = %q for %d", s.Kind, s.PID)
+		}
+		roles[s.PID] = s.Role
+	}
+	if roles[41] != "leaf" || roles[42] != "head" {
+		t.Errorf("roles = %v, want rpc-server leaf, llama-server head", roles)
+	}
+}

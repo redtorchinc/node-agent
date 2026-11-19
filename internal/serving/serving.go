@@ -114,6 +114,17 @@ func isWorkerTitle(name string) bool {
 	return strings.HasPrefix(n, "vllm::") || strings.HasPrefix(n, "ray::") || strings.HasPrefix(n, "sglang::")
 }
 
+// isLauncher: container CLIs. `docker run … vllm serve …` under a systemd
+// unit is not the service (that runs in the container), but its unit is the
+// name an operator restarts, so it is lent to the container service.
+func isLauncher(name string) bool {
+	switch strings.ToLower(name) {
+	case "docker", "podman", "nerdctl":
+		return true
+	}
+	return false
+}
+
 // servingKinds are the API servers the host scan seeds discovery with.
 var servingKinds = map[string]bool{"vllm": true, "sglang": true, "llama.cpp": true, "triton": true, "tgi": true}
 
@@ -181,7 +192,7 @@ func Classify(name string, argv []string) string {
 		return "sglang"
 	case n == "ollama" || has("ollama serve", "ollama runner"):
 		return "ollama"
-	case has("llama-server"):
+	case has("llama-server", "rpc-server"):
 		return "llama.cpp"
 	case has("tritonserver"):
 		return "triton"
@@ -341,6 +352,13 @@ func (x *Discoverer) resolve(ctx context.Context, procs map[int32]int64) []Servi
 	}
 	sort.Slice(gpuPIDs, func(i, j int) bool { return gpuPIDs[i] < gpuPIDs[j] })
 
+	type launcher struct {
+		unit, model string
+		port        uint32
+	}
+	var launchers []launcher
+	seenLauncher := map[int32]bool{}
+
 	service := func(pid int32) *Service {
 		root, rootProc, ok := x.root(pid, listen)
 		if !ok {
@@ -348,6 +366,14 @@ func (x *Discoverer) resolve(ctx context.Context, procs map[int32]int64) []Servi
 		}
 		if s := byRoot[root]; s != nil {
 			return s
+		}
+		if isLauncher(rootProc.Name) {
+			if !seenLauncher[root] {
+				seenLauncher[root] = true
+				unit, _ := x.deps.Unit(root)
+				launchers = append(launchers, launcher{unit, CmdlineModel(rootProc.Cmdline), CmdlinePort(rootProc.Cmdline)})
+			}
+			return nil
 		}
 		s := &Service{
 			PID:         root,
@@ -369,9 +395,16 @@ func (x *Discoverer) resolve(ctx context.Context, procs map[int32]int64) []Servi
 				}
 			}
 			for _, a := range rootProc.Cmdline {
-				if a == "--headless" {
-					s.Role = "leaf"
+				switch {
+				case a == "--headless":
+					s.Role = "leaf" // vLLM multi-node leaf
+				case a == "--rpc" || strings.HasPrefix(a, "--rpc="):
+					s.Role = "head" // llama.cpp with RPC workers
 				}
+			}
+			if strings.Contains(strings.ToLower(rootProc.Name), "rpc-server") ||
+				(len(rootProc.Cmdline) > 0 && strings.Contains(rootProc.Cmdline[0], "rpc-server")) {
+				s.Role = "leaf" // llama.cpp RPC worker
 			}
 		}
 		byRoot[root] = s
@@ -393,6 +426,29 @@ func (x *Discoverer) resolve(ctx context.Context, procs map[int32]int64) []Servi
 		service(pid)
 	}
 
+	// A containerised serve: its cgroup unit is the container's own scope,
+	// which container_id already carries. Name it by the systemd unit of the
+	// launcher that started it instead, matched on served model (+ port).
+	for _, r := range order {
+		s := byRoot[r]
+		if s.ContainerID == "" {
+			continue
+		}
+		if strings.HasSuffix(s.Unit, ".scope") {
+			s.Unit = ""
+		}
+		for _, l := range launchers {
+			if l.unit == "" || l.model == "" || !containsStr(s.Models, l.model) {
+				continue
+			}
+			if len(s.ListenPorts) > 0 && l.port != 0 && !containsPort(s.ListenPorts, l.port) {
+				continue
+			}
+			s.Unit = l.unit
+			break
+		}
+	}
+
 	out := make([]Service, 0, len(order))
 	for _, r := range order {
 		out = append(out, *byRoot[r])
@@ -400,8 +456,27 @@ func (x *Discoverer) resolve(ctx context.Context, procs map[int32]int64) []Servi
 	return out
 }
 
+func containsStr(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPort(xs []uint32, v uint32) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // root walks from pid up the parent chain (stopping at init, shells,
 // supervisors and container plumbing) and picks the service root:
+//  0. an `ollama` process (outermost), which owns its runners;
 //  1. the outermost process listening on the port its own argv names
 //     (--port N) — a serving API, even under a wrapper like `uv run`;
 //  2. else the outermost non-worker process owning any listener — e.g. a
@@ -438,6 +513,11 @@ func (x *Discoverer) root(pid int32, listen func(int32) []Listener) (int32, Proc
 			}
 		}
 		return node{}, false
+	}
+	// Ollama: its runners (`ollama runner`, a bundled `llama-server` on a
+	// private port) belong to `ollama serve`.
+	if n, ok := pick(func(n node) bool { return strings.EqualFold(n.p.Name, "ollama") }); ok {
+		return n.pid, n.p, true
 	}
 	if n, ok := pick(func(n node) bool {
 		own := CmdlinePort(n.p.Cmdline)
@@ -583,6 +663,24 @@ func (x *Discoverer) probe(ctx context.Context, s *Service, root Proc, ls []List
 
 func (x *Discoverer) probeOne(ctx context.Context, kind string, l Listener) probeResult {
 	base := "http://" + hostFor(l.Addr) + ":" + strconv.FormatUint(uint64(l.Port), 10)
+	if kind == "ollama" {
+		// /api/ps lists the models loaded (holding memory), not all pulled.
+		if body, ok := x.get(ctx, base+"/api/ps"); ok {
+			var ps struct {
+				Models []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			}
+			r := probeResult{endpoint: base}
+			if json.Unmarshal(body, &ps) == nil {
+				for _, m := range ps.Models {
+					r.models = append(r.models, m.Name)
+				}
+			}
+			return r
+		}
+		return probeResult{}
+	}
 	if body, ok := x.get(ctx, base+"/v1/models"); ok {
 		var m struct {
 			Data []struct {
@@ -600,12 +698,6 @@ func (x *Discoverer) probeOne(ctx context.Context, kind string, l Listener) prob
 			}
 			return r
 		}
-	}
-	if kind == "ollama" {
-		if _, ok := x.get(ctx, base+"/api/version"); ok {
-			return probeResult{endpoint: base}
-		}
-		return probeResult{}
 	}
 	if _, ok := x.get(ctx, base+"/health"); ok {
 		return probeResult{endpoint: base}

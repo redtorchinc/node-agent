@@ -53,6 +53,11 @@ holds several listeners (NCCL / ZMQ); those are never touched.
   the head's `ray` service, which gets `role: head`.
 - **`vllm serve --headless` leaf (no Ray):** `role: leaf`, with the model
   taken from its command line.
+- **llama.cpp RPC (v0.3.9):** `llama-server --rpc …` is `role: head`;
+  `rpc-server` is `role: leaf`.
+- **Containers (v0.3.9):** a serve started by `docker run` (or podman / nerdctl)
+  under a systemd unit is named by that unit, not by the container's scope;
+  `container_id` is set. The launcher process is not listed itself.
 
 - Each serve is probed like the primary (`/v1/models` + `/metrics`, own 30 s
   cache). Its models are appended to `platforms.vllm.models[]`.

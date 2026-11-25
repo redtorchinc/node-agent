@@ -74,6 +74,8 @@ func TestDegradedReasonsDocsInSync(t *testing.T) {
 		ReasonRDMAErrorsGrowing,
 		ReasonRDMAPFCStorm,
 		ReasonRDMALinkDegraded,
+		// v0.3.10 soft
+		ReasonGPUUnderclocked,
 	}
 	inCode := map[string]bool{}
 	for _, c := range constants {

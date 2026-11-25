@@ -58,6 +58,14 @@ node). **soft** reasons stay in `reasons[]` but `degraded` may be false
 | `rdma_pfc_storm` | Reserved. |
 | `rdma_link_degraded` | Active port with `rate_gbps < 200`. |
 
+## v0.3.10 additions
+
+### Soft
+
+| Reason | Trigger |
+|---|---|
+| `gpu_underclocked` | A GPU has been busy (`util_pct` ≥ 50) at under half its reference clock (`clock_sm_mhz`, else `clock_graphics_mhz`, below 0.5 × `clock_graphics_app_mhz`, else `clock_graphics_max_mhz`) for at least 5 minutes of consecutive `/health` samples. `gpus[].underclocked_since` carries the onset (unix seconds) while the state holds. Catches a GPU stuck at a low clock with no driver throttle bit set (#54: a GB10 at 611 MHz / 8 W against a 2418 MHz applications clock, P0, mask `0x0`), which `gpu_*_throttling` cannot see. Silent at idle, and when a clock is unreported. |
+
 ## Contract
 
 - Backends that don't recognize a reason **must** ignore it (forward-compat).

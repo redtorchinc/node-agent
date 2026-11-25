@@ -181,6 +181,18 @@ key (surfaced by the migrator's missing-top-key detection) and capability
 flag `ray_supported`, which reports whether the *probe ran*: a missing
 block only means "not in a cluster" when that flag is true. Contract:
 docs/api/ray.md.
+**v0.3.10** adds the soft degraded reason `gpu_underclocked` (issue #54). A GB10
+came back from a reboot with its GPU at 611 MHz / 8 W against a 2418 MHz
+applications clock and served at about half speed for 29 h while the agent said
+healthy. The driver reported P0 with clocks_event_reasons `0x0`, so the
+throttle-bit reasons could not see it. The rule reads behaviour instead: busy
+(`util_pct` ≥ 50) at under half the applications clock (else the max clock) for
+5 min of consecutive samples. Evaluate stays a pure function of one Report: an
+`underclockTracker` on the Reporter stamps `gpus[].underclocked_since` (onset,
+additive wire field) and Evaluate applies the window. New additive GPU field
+`clock_graphics_app_mhz` (nvidia-smi `clocks.applications.graphics`, appended as
+the last query column so short rows from older drivers still parse). Silent at
+idle and when a clock is unreported. No config change.
 **v0.3.9** fixes three discovery misreads seen on the fleet:
 - an Ollama runner (a bundled `llama-server` on a private port) is grouped
   under `ollama serve`, kind `ollama`, with its loaded models from `/api/ps`;

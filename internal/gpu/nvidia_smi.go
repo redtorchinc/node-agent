@@ -69,7 +69,8 @@ const queryFields = "index,uuid,name,driver_version,pci.bus_id," +
 	"clocks.gr,clocks.mem,clocks.sm,clocks.max.gr," +
 	"clocks_throttle_reasons.active," +
 	"ecc.errors.uncorrected.volatile.total,ecc.errors.uncorrected.aggregate.total," +
-	"fan.speed,persistence_mode,compute_mode,mig.mode.current"
+	"fan.speed,persistence_mode,compute_mode,mig.mode.current," +
+	"clocks.applications.graphics"
 
 // Field indices for the above list. Keep contiguous with queryFields.
 const (
@@ -98,6 +99,7 @@ const (
 	fPersistence
 	fComputeMode
 	fMIGMode
+	fClockGrApp // v0.3.10 (#54); appended so older fixtures/drivers read 0
 )
 
 // Probe implements Probe.
@@ -213,6 +215,7 @@ func ParseNvidiaSMI(gpuCSV, procCSV []byte) ([]GPU, error) {
 			ClockMemoryMHz:      atoi(get(fClockMem)),
 			ClockSMMHz:          atoi(get(fClockSM)),
 			ClockGraphicsMaxMHz: atoi(get(fClockGrMax)),
+			ClockGraphicsAppMHz: atoi(get(fClockGrApp)),
 			ThrottleReasons:     parseThrottleHex(get(fThrottle)),
 			PersistenceMode:     get(fPersistence),
 			ComputeMode:         get(fComputeMode),

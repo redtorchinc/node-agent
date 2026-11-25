@@ -252,6 +252,7 @@ Soft (deprioritize but usable):
 - `"load_avg_over_2x_cores"` — CPU saturated
 - `"ollama_runner_stuck"` — runner pid exists but CPU at 0 for >60s with queued requests
 - `"vram_service_creep_warn"` — tracked `service_allocators` entry shows `reserved_mb / allocated_mb > 2.0` (less severe than the hard threshold). Early signal; backend logs and continues to use the node.
+- `"gpu_underclocked"` (v0.3.10, #54) — a GPU busy (`util_pct` ≥ 50) at under half its applications clock (`clock_graphics_app_mhz`, else `clock_graphics_max_mhz`) for ≥ 5 min of consecutive samples; onset in `gpus[].underclocked_since`. For a GPU stuck at a low clock with no driver throttle bit. Full list: docs/degraded-reasons.md.
 
 ### Service allocator scraping
 

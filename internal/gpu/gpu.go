@@ -41,6 +41,16 @@ type GPU struct {
 	ClockMemoryMHz      int `json:"clock_memory_mhz,omitempty"`
 	ClockSMMHz          int `json:"clock_sm_mhz,omitempty"`
 	ClockGraphicsMaxMHz int `json:"clock_graphics_max_mhz,omitempty"`
+	// ClockGraphicsAppMHz is the applications (default operating) graphics
+	// clock: what a busy GPU normally runs at. clock_graphics_max_mhz is the
+	// boost ceiling. v0.3.10 (#54).
+	ClockGraphicsAppMHz int `json:"clock_graphics_app_mhz,omitempty"`
+
+	// UnderclockedSince is the unix time this GPU was first seen busy at under
+	// half its applications clock, in an unbroken run of /health samples. Set
+	// by the health composer; omitted when the GPU is not in that state.
+	// v0.3.10 (#54).
+	UnderclockedSince int64 `json:"underclocked_since,omitempty"`
 
 	ThrottleReasons []string `json:"throttle_reasons,omitempty"`
 

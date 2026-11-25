@@ -153,6 +153,29 @@ func TestParseNvidiaSMI_GB10Unified(t *testing.T) {
 	}
 }
 
+// v0.3.10 (#54): the applications clock is the last column. A row with it
+// parses; a row from a driver that omits it reads 0 (the rule then falls back
+// to the max clock).
+func TestParseNvidiaSMI_ApplicationsClock(t *testing.T) {
+	row := "0, GPU-gb10-abcd, NVIDIA GB10, 580.142, 0000000F:01:00.0, 12.1, [N/A], [N/A], 74, 0, 41, [N/A], 8.07, [N/A], 611, [N/A], 611, 3003, 0x0, [N/A], [N/A], [N/A], Enabled, Default, [N/A], 2418\n"
+	gpus, err := ParseNvidiaSMI([]byte(row), nil)
+	if err != nil {
+		t.Fatalf("ParseNvidiaSMI: %v", err)
+	}
+	g := gpus[0]
+	if g.ClockGraphicsAppMHz != 2418 || g.ClockSMMHz != 611 || g.ClockGraphicsMaxMHz != 3003 {
+		t.Errorf("clocks app/sm/max = %d/%d/%d, want 2418/611/3003",
+			g.ClockGraphicsAppMHz, g.ClockSMMHz, g.ClockGraphicsMaxMHz)
+	}
+	old, err := ParseNvidiaSMI([]byte(fullRow0), nil)
+	if err != nil {
+		t.Fatalf("ParseNvidiaSMI: %v", err)
+	}
+	if old[0].ClockGraphicsAppMHz != 0 {
+		t.Errorf("row without the column: app clock = %d, want 0", old[0].ClockGraphicsAppMHz)
+	}
+}
+
 // A normal discrete-GPU row (memory.total present) must NOT be flagged unified.
 func TestParseNvidiaSMI_DiscreteNotUnified(t *testing.T) {
 	gpus, err := ParseNvidiaSMI([]byte(fullRow0), nil)

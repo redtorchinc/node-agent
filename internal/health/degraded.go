@@ -46,6 +46,9 @@ const (
 	ReasonRDMAErrorsGrowing    = "rdma_errors_growing"
 	ReasonRDMAPFCStorm         = "rdma_pfc_storm"
 	ReasonRDMALinkDegraded     = "rdma_link_degraded"
+
+	// v0.3.10 soft reasons
+	ReasonGPUUnderclocked = "gpu_underclocked"
 )
 
 // hasSoftReason reports whether any element of reasons is NOT in
@@ -171,6 +174,9 @@ func Evaluate(r Report, cfg config.Config, now time.Time) (bool, []string) {
 	}
 	if anyGPUThrottle(r, "POWER") {
 		reasons = append(reasons, ReasonGPUPowerThrottling)
+	}
+	if gpuUnderclocked(r, now) {
+		reasons = append(reasons, ReasonGPUUnderclocked)
 	}
 	if vllmSoftDown(r, cfg) {
 		reasons = append(reasons, ReasonVLLMDown)

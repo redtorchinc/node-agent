@@ -212,6 +212,8 @@ type Reporter struct {
 	services  ServicesReporter
 	mode      ModeReporter
 
+	underclock underclockTracker // gpu_underclocked onset per GPU (#54)
+
 	start time.Time
 	now   func() time.Time
 }
@@ -349,6 +351,8 @@ func (r *Reporter) Report(ctx context.Context) (Report, error) {
 	if gpus == nil {
 		gpus = []gpu.GPU{}
 	}
+	// The probe hands back a copy of its cache, so stamping is race-free.
+	r.underclock.stamp(gpus, r.now())
 	rep.GPUs = gpus
 
 	rep.GPUServices = []serving.Service{}
